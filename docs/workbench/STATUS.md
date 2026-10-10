@@ -4,7 +4,7 @@
 
 ## 下一步
 
-P8（MCP library 工具）：分支 `workbench/p8-mcp`。P8、P9 已写好并经过 /code-review（P8 另做了 /security-review）修复，叠在 P7 之上。
+P9（移动端、文档、收尾）：分支 `workbench/p9-mobile`。合并后对从分叉点到 main 的完整 diff 做最终 /code-review，写最终总结。
 
 ## 分期进度
 
@@ -18,7 +18,7 @@ P8（MCP library 工具）：分支 `workbench/p8-mcp`。P8、P9 已写好并经
 | P5  | 多列布局与页签界面          | 完成   | 见本 PR | 1–4 列、页签、布局记忆           |
 | P6  | 跨列拖拽与复制              | 完成   | 见本 PR | Alt 复制；一次放下一步撤销       |
 | P7  | 键盘移动、移动到…、撤销回位 | 完成   | 见本 PR | Ctrl+Alt+←/→；移动到…先列页签    |
-| P8  | MCP library 工具            | 未开始 |         |                                  |
+| P8  | MCP library 工具            | 完成   | 见本 PR | 4 个工具；Agent 文件夹           |
 | P9  | 移动端、文档、收尾          | 未开始 |         |                                  |
 
 ## 基线（P0 填写）
@@ -107,6 +107,16 @@ P8（MCP library 工具）：分支 `workbench/p8-mcp`。P8、P9 已写好并经
 全部静态门槛通过。全量 e2e 512/514，失败的两条都是基线已知（`week-calendar:461`、`undo-redo:527`）。新增 `workbench-keyboard.spec.ts` 3 条全过，覆盖 PLAN 验收的"焦点落在源列下一个节点、撤销回到原列"；"上次聚焦位置"的规则有单测（含镜像、锁定、镜像根）。/code-review 提出 10 条，全部修复（落点与槽位按渲染键处理镜像、锁定父节点回退到末尾、记住的目标行改为落下节点的渲染键、不依赖目标列已渲染的行、选区只在源列时才移动、原地不动时不报错、Cmd+K 用打开时的快照、目标视图隐藏时提示、共用祖先判断）。
 
 - **连续两次撤销，第二次可能被吞掉**（P7 测试中发现，非本期引入）：上一次撤销还在落定（history busy，ADR 0064）时按下的 Cmd+Z 会被直接丢弃，不排队。人手速度下很少遇到；测试里改为等 Cmd+K 的"撤销"重新可用再按。选项：A. 维持；B. busy 时把一次撤销请求排队。倾向 B，但它改 ADR 0064 的语义，留给下一轮。
+
+### P8 门槛
+
+全部静态门槛通过。worker 单测覆盖四个新工具的 schema、存储读写和边界（错误文件夹不留节点、Agent 文件夹复用与固定 id 不覆盖、Daily 容器拒绝、重复行一起移动、未知字段保留）。全量 e2e 512/514：`week-calendar:461` 已知，`undo-redo:417` 单独重跑通过。
+
+本地 `cf:dev` 冒烟（新铸的 bearer 只在 scratchpad 文件里，未打印）：`tools/list` 列出 16 个工具 → `create_folder` "Smoke folder" → `create_note`（带两层子节点，自动建 "Agent" 文件夹并归档）→ `list_library` → `move_note` 到 "Smoke folder" → 再次 `list_library` 正确。用开发账号登录浏览器：侧栏里 "Smoke folder" 下显示该笔记，点开为预览页签，节点带 agent 来源标记。
+
+/code-review 提出 8 条：修了 7 条（Agent 文件夹经 DO 原子 get-or-create 认领、复用绘制在顶层的同名文件夹、`move_note` 拒绝 Daily 容器并移动所有重复行、写回保留未知字段、读并发、行类型与 schema 绑定），1 条（错误包装的重复代码）不改。/security-review：没有可利用的问题（DO 按 `resolveUserId` 取、输入经 Effect Schema、kv 键由服务端生成、付费门槛覆盖新工具）；唯一的观察（两处回执里文件夹名未做 spoiler 遮蔽）已顺手修掉。
+
+- **library 不实时推送，靠窗口聚焦时重新拉取**（P8，PLAN 1.10 要求本期决定是否轮询）：决定不加轮询，记在 ADR 0070。agent 建的节点经节点同步立即出现在"未归档"，聚焦后归位。
 
 ## 偏离方案记录
 
