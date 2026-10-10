@@ -1742,10 +1742,11 @@ export const tools: ReadonlyArray<ToolDef> = [
           ),
         );
         const folder = yield* filed;
-        const folderName =
+        const folderName = redactSpoilers(
           folder.title ??
-          rows.find((r) => r.id === folder.id)?.title ??
-          folder.id;
+            rows.find((r) => r.id === folder.id)?.title ??
+            folder.id,
+        );
         return mcpReceipt(
           `Created note "${title}" (node id: ${nodeId}) in folder "${folderName}":\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
         );
@@ -1817,7 +1818,7 @@ export const tools: ReadonlyArray<ToolDef> = [
         const where =
           folderId === null
             ? "the top of the library"
-            : `folder "${rows.find((r) => r.id === folderId)?.title ?? folderId}"`;
+            : `folder "${redactSpoilers(rows.find((r) => r.id === folderId)?.title ?? folderId)}"`;
         return mcpReceipt(
           `${existing.length ? "Moved" : "Filed"} note "${noteTitle(index, node.id)}" to ${where}.`,
         );
