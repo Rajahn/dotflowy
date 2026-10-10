@@ -40,6 +40,19 @@ const order = (page: Page, i: number) =>
         .map((r) => r.id),
     );
 
+/** Wait until the history accepts another undo: Cmd+K offers it enabled. */
+async function historyIdle(page: Page) {
+  await expect
+    .poll(async () => {
+      await page.keyboard.press("ControlOrMeta+k");
+      const undo = page.getByRole("option", { name: /^Undo/ }).first();
+      const disabled = await undo.getAttribute("aria-disabled");
+      await page.keyboard.press("Escape");
+      return disabled;
+    })
+    .toBe("false");
+}
+
 /** Alpha in the left column, Beta in a new right column. */
 async function load(page: Page) {
   await seedOutline(page, TREE, {
@@ -106,8 +119,8 @@ test("Ctrl+Alt+Right moves a bullet after the other column's caret row; one undo
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => order(page, 0)).toEqual(["a1", "a3"]);
   // An undo pressed while the last one is still landing is dropped (the
-  // history is busy); its focus landing is the end of it.
-  await expect(page.locator(".node-text:focus")).toHaveCount(1);
+  // history is busy, ADR 0064): wait until Undo is offered again.
+  await historyIdle(page);
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => order(page, 0)).toEqual(["a1", "a2", "a3"]);
   await expect.poll(() => order(page, 1)).toEqual(["b1", "b2"]);
