@@ -94,7 +94,9 @@ test("move and copy across columns, one undo each; tab, strip and sidebar target
 
   // Move "Alpha one" into the right column, between Beta one and Beta two.
   const b2 = (await row(page, 1, "b2").boundingBox())!;
-  await dragBullet(page, 0, "a1", b2.x + 30, b2.y + 2);
+  // At the row's left edge: depth 0 there, a sibling (right of it by more
+  // than an indent would nest under the row above).
+  await dragBullet(page, 0, "a1", b2.x + 4, b2.y + 2);
   await expect(page.locator(".drag-indicator")).toBeVisible();
   await page.mouse.up();
   await expect(row(page, 1, "a1")).toHaveAttribute("data-parent-id", "beta");
@@ -127,7 +129,7 @@ test("move and copy across columns, one undo each; tab, strip and sidebar target
     page,
     0,
     "a2",
-    b2Again.x + 30,
+    b2Again.x + 4,
     b2Again.y + b2Again.height + 4,
   );
   await expect(page.locator(".drag-pill[data-copy]")).toBeVisible();
