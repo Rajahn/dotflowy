@@ -202,7 +202,7 @@ test("move and copy across columns, one undo each; tab, strip and sidebar target
     .getByRole("button", { name: "Archive", exact: true })
     .locator("xpath=ancestor::li[1]");
   await expect(
-    archive.getByRole("button", { name: "Alpha three" }),
+    archive.getByRole("button", { name: "Alpha three", exact: true }),
   ).toBeVisible();
   await expect(row(page, 1, "a3")).toHaveCount(0);
 });

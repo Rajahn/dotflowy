@@ -70,7 +70,9 @@ test("preview tabs, pinning, splitting to four columns, closing, restore", async
   await expect(tabs(page, 0).nth(2)).not.toHaveAttribute("data-preview", "");
 
   // Split: a second column with the same view; typing in one shows in both.
-  await column(page, 0).getByRole("button", { name: "Split right" }).click();
+  await column(page, 0)
+    .getByRole("button", { name: "Split right", exact: true })
+    .click();
   await expect(columns(page)).toHaveCount(2);
   await expect(title(page, 1)).toHaveText("Gamma!");
   await title(page, 0).click();
@@ -80,16 +82,22 @@ test("preview tabs, pinning, splitting to four columns, closing, restore", async
   await page.screenshot({ path: info.outputPath("two-columns.png") });
 
   // Up to four columns, then the split control is disabled.
-  await column(page, 1).getByRole("button", { name: "Split right" }).click();
-  await column(page, 2).getByRole("button", { name: "Split right" }).click();
+  await column(page, 1)
+    .getByRole("button", { name: "Split right", exact: true })
+    .click();
+  await column(page, 2)
+    .getByRole("button", { name: "Split right", exact: true })
+    .click();
   await expect(columns(page)).toHaveCount(4);
   for (let i = 0; i < 4; i++)
     await expect(
-      column(page, i).getByRole("button", { name: "Split right" }),
+      column(page, i).getByRole("button", { name: "Split right", exact: true }),
     ).toBeDisabled();
 
   // Closing a column's last tab closes the column.
-  await column(page, 3).getByRole("button", { name: "Close Gamma!?" }).click();
+  await column(page, 3)
+    .getByRole("button", { name: "Close Gamma!?", exact: true })
+    .click();
   await expect(columns(page)).toHaveCount(3);
 
   // The layout comes back after a reload (once its save has landed).
@@ -116,7 +124,7 @@ test("preview tabs, pinning, splitting to four columns, closing, restore", async
   // Closing every tab of the last column leaves the empty state.
   for (const i of [2, 1]) {
     await column(page, i)
-      .getByRole("button", { name: "Close Gamma!?" })
+      .getByRole("button", { name: "Close Gamma!?", exact: true })
       .click();
   }
   await expect(columns(page)).toHaveCount(1);
@@ -134,7 +142,9 @@ test("preview tabs, pinning, splitting to four columns, closing, restore", async
   ).toBeVisible();
   await page.screenshot({ path: info.outputPath("empty-pane.png") });
   // Its recent list reopens a note.
-  await column(page, 0).getByRole("button", { name: "Gamma!?" }).click();
+  await column(page, 0)
+    .getByRole("button", { name: "Gamma!?", exact: true })
+    .click();
   await expect(title(page, 0)).toHaveText("Gamma!?");
 });
 
