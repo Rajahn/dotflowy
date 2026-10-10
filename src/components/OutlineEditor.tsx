@@ -150,6 +150,7 @@ import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
+import { registerDragSurface } from "./drag-surfaces";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { carryFocus, takeCarriedFocus } from "./focus-carry";
 import { Header } from "./Header";
@@ -568,6 +569,29 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   // Stable references (useCallback([]) inside the hook), safe to close over in
   // the memoized commands below.
   const { startDrag, consumeClick } = drag;
+
+  // This column as a drop surface for a drag started in ANY column
+  // (docs/workbench/PLAN.md 2.6): the drag projects its gap and depth on these
+  // rows, and lands focus + flash here after a drop.
+  useEffect(
+    () =>
+      registerDragSurface({
+        paneId,
+        getRootId: () => getViewRootIdFor(paneId),
+        getIsHidden: () => getViewIsHiddenFor(paneId),
+        getFilter: () => getViewFilterFor(paneId),
+        getRowEl: (key) =>
+          // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
+          (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ??
+          null,
+        getListEl: () => listRef.current,
+        land: (key) => {
+          pendingFocus.current = key;
+          pendingFlash.current = key;
+        },
+      }),
+    [paneId, refs, pendingFocus, pendingFlash],
+  );
 
   // The per-bullet command set. Recreating it each render would change a prop
   // on every memoized OutlineRow and re-render the whole tree on every

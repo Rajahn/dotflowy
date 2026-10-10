@@ -215,3 +215,8 @@ export function libraryNoteRoot(rowId: string): string | null {
   const row = liveRows().find((r) => r.id === rowId);
   return row?.type === "note" ? (row.rootNodeId ?? null) : null;
 }
+
+/** A library row by id (live), for drop targets resolved at event time. */
+export function libraryRow(rowId: string): LibraryRow | undefined {
+  return liveRows().find((r) => r.id === rowId);
+}

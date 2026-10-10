@@ -1102,6 +1102,34 @@ body.dragging-active * {
   box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
 }
 
+/* Alt/Option held over a drop: the drag copies (docs/workbench/PLAN.md 1.4). */
+.drag-pill[data-copy]::before {
+  content: "+ Copy";
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+/* A drop the target would refuse (a locked parent, a node into itself). */
+body.dragging-active.drag-refused * {
+  cursor: not-allowed !important;
+}
+
+body.dragging-active.drag-refused .drag-indicator {
+  display: none;
+}
+
+/* A workbench target under a bullet drag: a tab, a tab strip, a sidebar row. */
+[data-drop-active] {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
 /* The drop line. Its left edge is indented to the target depth, so the indent
    itself is the depth feedback. A dot at the left marks the insertion point. */
 .drag-indicator {
