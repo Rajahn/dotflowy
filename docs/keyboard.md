@@ -24,13 +24,14 @@ anywhere.
 
 Wide screens only. Every action is also in `Cmd/Ctrl+K`.
 
-| Key                                                     | Action                                |
-| ------------------------------------------------------- | ------------------------------------- |
-| Mac `Ctrl+1`…`4`; Windows `Alt+1`…`4`                   | Focus column 1–4                      |
-| `Ctrl+Alt+[` / `Ctrl+Alt+]` (Mac `Ctrl+Option+[` / `]`) | Focus the column on the left / right  |
-| `Cmd/Ctrl+\`                                            | Split: open this view in a new column |
-| Mac `Ctrl+W`; others `Alt+W`                            | Close the active tab                  |
-| `Alt+[` / `Alt+]` (Mac `Option+[` / `]`)                | Previous / next tab in the column     |
+| Key                                                     | Action                                                                 |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Mac `Ctrl+1`…`4`; Windows `Alt+1`…`4`                   | Focus column 1–4                                                       |
+| `Ctrl+Alt+[` / `Ctrl+Alt+]` (Mac `Ctrl+Option+[` / `]`) | Focus the column on the left / right                                   |
+| `Cmd/Ctrl+\`                                            | Split: open this view in a new column                                  |
+| Mac `Ctrl+W`; others `Alt+W`                            | Close the active tab                                                   |
+| `Alt+[` / `Alt+]` (Mac `Option+[` / `]`)                | Previous / next tab in the column                                      |
+| `Ctrl+Alt+←` / `Ctrl+Alt+→` (Mac `Ctrl+Option+←` / `→`) | Move the selection (or the bullet) into the column on the left / right |
 
 Chosen against the existing bindings above and the browsers' reserved keys
 (`Cmd+1…9`, `Cmd+W`, `Cmd+T/N`, `Ctrl+Tab` cannot be overridden by a web
@@ -38,6 +39,13 @@ page). Linux Chrome keeps `Alt+1…8` for its own tabs, so on Linux use
 `Ctrl+Alt+[` / `]` or `Cmd/Ctrl+K` to move between columns. `Option` chords on
 a Mac type special characters, so the workbench matches the physical key and
 cancels the character.
+
+A move into another column lands right after the bullet that column last had
+the caret in (or at the end of its view), and the caret stays where you were,
+on the next bullet. One `Cmd/Ctrl+Z` puts the move back. `Ctrl+Option+arrows`
+are also VoiceOver's keys while it runs, and some Windows graphics drivers
+rotate the screen on `Ctrl+Alt+arrows`; the `/move` picker, which lists the
+open tabs first, and `Cmd/Ctrl+K` do the same move.
 
 Mouse: click a sidebar note to preview it (italic tab, replaced by the next
 preview); double-click it, `Cmd/Ctrl+click` it, or edit in its tab to keep it

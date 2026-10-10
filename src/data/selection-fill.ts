@@ -121,6 +121,12 @@ export function useSyncSelectionFillRows(
   }, [paneId, nextRows]);
 }
 
+/** `paneId`'s current flat row list, read at event time (empty when no
+ *  editor is mounted there). */
+export function getPaneRows(paneId: string): readonly VisibleRow[] {
+  return rowsByPane.get(paneId) ?? [];
+}
+
 /** Drop a closed pane's rows. */
 export function forgetSelectionFillPane(paneId: string): void {
   rowsByPane.delete(paneId);

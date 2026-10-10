@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import Fuse, { type FuseResultMatch } from "fuse.js";
-import { BookmarkIcon, HomeIcon } from "lucide-react";
+import { BookmarkIcon, HomeIcon, PanelsTopLeftIcon } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -23,6 +23,7 @@ import {
 } from "../data/tree";
 import { useTree } from "../data/useTree";
 import { searchAnnotation, usePluginChrome } from "../plugins/registry";
+import { useWorkbenchState } from "../workbench/store";
 import { requestFlashAfterNav } from "./flash-node";
 import { setMoveDialogOpener, type MoveMode } from "./move-dialog-opener";
 import {
@@ -50,9 +51,11 @@ import {
  * action passes the selected root run (ADR 0018), moved together as one atomic
  * batch. The candidate list excludes the union of every moved node's subtree.
  *
- * The empty-query state lists **bookmarks** (same as the quick-switcher), since
- * the usual move target is a saved view -- so the common case is a single pick,
- * no typing. Typing falls back to the full fuzzy search over every node.
+ * The empty-query state lists the roots of the **open tabs** first (the
+ * workbench's columns are where material is being gathered, PLAN 1.5), then
+ * **bookmarks** (same as the quick-switcher), since the usual move target is a
+ * view you already have -- so the common case is a single pick, no typing.
+ * Typing falls back to the full fuzzy search over every node.
  *
  * After the move it stays put and fires a toast confirming the destination
  * (with a "Go" action to jump there on demand) -- moving a node shouldn't yank
@@ -66,6 +69,13 @@ interface Hit {
 }
 
 const RESULT_LIMIT = 50;
+
+const OPEN_TABS_HEADING = (
+  <div className="flex items-center gap-1">
+    <PanelsTopLeftIcon className="size-4" />
+    Open tabs
+  </div>
+);
 
 const BOOKMARKS_HEADING = (
   <div className="flex items-center gap-1">
@@ -196,6 +206,24 @@ function MoveDialogInner({
     [candidates],
   );
 
+  // The open tabs' roots, column by column, each once. Drawn from `candidates`
+  // like the bookmarks, so a tab showing a moved node (or inside it) is left
+  // out; a tab on the whole outline is the "Home" row below.
+  const workbench = useWorkbenchState();
+  const openTabs = useMemo(() => {
+    const allowed = new Map(candidates.map((n) => [n.id, n]));
+    const seen = new Set<string>();
+    const out: Node[] = [];
+    for (const pane of workbench.panes)
+      for (const tab of pane.tabs) {
+        const node = tab.rootId ? allowed.get(tab.rootId) : undefined;
+        if (!node || seen.has(node.id)) continue;
+        seen.add(node.id);
+        out.push(node);
+      }
+    return out;
+  }, [candidates, workbench]);
+
   // "Home" shows on an empty query or when the text looks like the word.
   const showHome = q === "" || "home".includes(q.toLowerCase());
 
@@ -299,6 +327,19 @@ function MoveDialogInner({
           placeholder={copy.placeholder}
         />
         <CommandList>
+          {results === null && openTabs.length > 0 && (
+            <CommandGroup heading={OPEN_TABS_HEADING}>
+              {openTabs.map((node) => (
+                <DestinationRow
+                  key={node.id}
+                  value={`tab:${node.id}`}
+                  index={index}
+                  node={node}
+                  onSelect={commit}
+                />
+              ))}
+            </CommandGroup>
+          )}
           {showHome && (
             <CommandGroup heading="Top level">
               <CommandItem value="__home__" onSelect={() => commit(null)}>
@@ -352,11 +393,15 @@ function Hint({ children }: { children: ReactNode }) {
 }
 
 function DestinationRow({
+  value,
   index,
   node,
   matches,
   onSelect,
 }: {
+  /** The list value, when the node may appear in two groups (cmdk keys its
+   *  highlight on it). Defaults to the node id. */
+  value?: string;
   index: TreeIndex;
   node: Node;
   matches?: readonly FuseResultMatch[];
@@ -376,7 +421,7 @@ function DestinationRow({
   const annotation = searchAnnotation(node);
 
   return (
-    <CommandItem value={node.id} onSelect={() => onSelect(node.id)}>
+    <CommandItem value={value ?? node.id} onSelect={() => onSelect(node.id)}>
       <div className="flex min-w-0 flex-col gap-0.5">
         <span
           className={cn(

@@ -573,39 +573,47 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   // This column as a drop surface for a drag started in ANY column
   // (docs/workbench/PLAN.md 2.6): the drag projects its gap and depth on these
   // rows, and lands focus + flash here after a drop.
-  useEffect(
-    () =>
-      registerDragSurface({
-        paneId,
-        getRootId: () => getViewRootIdFor(paneId),
-        getIsHidden: () => getViewIsHiddenFor(paneId),
-        getFilter: () => getViewFilterFor(paneId),
-        getRowEl: (key) =>
-          // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
-          (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ??
-          null,
-        getListEl: () => listRef.current,
-        land: (id) => {
-          // As the in-column move does: the render address re-derived
-          // through mirrors, and a drop the filter hides is said out loud.
-          const key = focusKeyFor(id, id, paneId);
-          pendingFocus.current = key;
-          pendingFlash.current = key;
-          if (!getViewFilterFor(paneId)) return;
-          const recomputed = buildViewFilter(
-            buildTreeIndex(getLiveNodes()),
-            viewCtx,
-            isHidden,
-          );
-          if (recomputed && !recomputed.visibleIds.has(key)) {
-            pendingFocus.current = null;
-            pendingFlash.current = null;
-            toast("Moved — hidden by the current filter.");
-          }
-        },
-      }),
-    [paneId, refs, pendingFocus, pendingFlash, viewCtx, isHidden],
-  );
+  useEffect(() => {
+    // The render key a node that just landed here shows under, or null (with a
+    // toast) when this column's view hides it.
+    const shownKey = (id: string): string | null => {
+      const key = focusKeyFor(id, id, paneId);
+      const fresh = buildTreeIndex(getLiveNodes());
+      const node = fresh.byId.get(id);
+      const filtered = getViewFilterFor(paneId)
+        ? buildViewFilter(fresh, viewCtx, isHidden)
+        : null;
+      if (
+        (node && isHidden(node)) ||
+        (filtered && !filtered.visibleIds.has(key))
+      ) {
+        toast("Moved — hidden in that view.");
+        return null;
+      }
+      return key;
+    };
+    return registerDragSurface({
+      paneId,
+      getRootId: () => getViewRootIdFor(paneId),
+      getIsHidden: () => getViewIsHiddenFor(paneId),
+      getFilter: () => getViewFilterFor(paneId),
+      getRowEl: (key) =>
+        // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
+        (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ?? null,
+      getListEl: () => listRef.current,
+      // As the in-column move does: the render address re-derived through
+      // mirrors, and a node this column's view hides (its filter, hidden
+      // completed) is said out loud rather than vanishing.
+      land: (id) => {
+        const key = shownKey(id);
+        pendingFocus.current = key;
+        pendingFlash.current = key;
+      },
+      flash: (id) => {
+        pendingFlash.current = shownKey(id);
+      },
+    });
+  }, [paneId, refs, pendingFocus, pendingFlash, viewCtx, isHidden]);
 
   // The per-bullet command set. Recreating it each render would change a prop
   // on every memoized OutlineRow and re-render the whole tree on every

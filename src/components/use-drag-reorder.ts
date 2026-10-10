@@ -293,6 +293,7 @@ export function useDragReorder(deps: DragDeps) {
       getRowEl: d.getRowEl,
       getListEl: d.getListEl,
       land: () => {},
+      flash: () => {},
     };
   }, []);
 

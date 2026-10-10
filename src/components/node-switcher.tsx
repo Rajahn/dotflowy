@@ -20,7 +20,10 @@ import { cn } from "@/lib/utils";
 
 import type { PluginDef, SearchAction } from "../plugins/types";
 
-import { getNodeActionBridge } from "../data/command-bridge";
+import {
+  getNodeActionBridge,
+  setCommandCenterAmbientRowKey,
+} from "../data/command-bridge";
 import {
   buildNodeActions,
   resolveAmbientTargetId,
@@ -172,6 +175,12 @@ export function NodeSwitcher() {
   // Capture the ambient target, THEN open -- both before the dialog steals focus.
   const openWithCapture = useCallback(() => {
     setTargetFocusedId(readFocusedNodeId());
+    const active = document.activeElement;
+    setCommandCenterAmbientRowKey(
+      active instanceof HTMLElement && active.matches(".node-text")
+        ? (active.dataset.historyKey ?? null)
+        : null,
+    );
     setOpen(true);
   }, []);
 
