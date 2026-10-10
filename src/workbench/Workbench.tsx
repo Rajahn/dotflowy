@@ -33,6 +33,7 @@ export function Workbench({ rootId }: Readonly<{ rootId: string | null }>) {
           <main
             data-pane-id={pane.id}
             data-pane-scroll={windowScroll ? undefined : ""}
+            data-scroll-restoration-id={windowScroll ? undefined : pane.id}
             className={
               windowScroll
                 ? undefined
