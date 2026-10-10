@@ -55,3 +55,16 @@ export function getNodeActionBridge(
 ): NodeActionBridge | null {
   return bridges.get(paneId) ?? null;
 }
+
+// The row the caret was on when the command center opened (ADR 0034's
+// ambient snapshot, as a render key): a global action that acts on "the
+// bullet you were on" reads it, since the dialog holds focus by then.
+let ambientRowKey: string | null = null;
+
+export function setCommandCenterAmbientRowKey(key: string | null): void {
+  ambientRowKey = key;
+}
+
+export function getCommandCenterAmbientRowKey(): string | null {
+  return ambientRowKey;
+}

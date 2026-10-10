@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { buildTreeIndex, createNode } from "../data/tree";
-import { buildVisibleRows } from "../data/visible-order";
+import { buildVisibleRows, rowKeyFor } from "../data/visible-order";
 import {
   columnMoveLanding,
   columnMoveSlot,
@@ -84,4 +84,48 @@ test("the caret lands after the moved block, else before it, else on the parent"
   );
   // A node not on screen moves nothing here.
   expect(columnMoveLanding(rows, INDEX, new Set(["o1"]), "note")).toBeNull();
+});
+
+// note2
+//   m  (a mirror of src)
+//   x
+//   lk (locked)
+//     l1
+// src
+//   s1
+//   s2
+const MIRRORED = buildTreeIndex([
+  createNode({ id: "note2", text: "Note 2" }),
+  createNode({ id: "m", parentId: "note2", mirrorOf: "src" }),
+  createNode({ id: "x", parentId: "note2", prevSiblingId: "m" }),
+  createNode({ id: "lk", parentId: "note2", prevSiblingId: "x", locked: true }),
+  createNode({ id: "l1", parentId: "lk" }),
+  createNode({ id: "src", prevSiblingId: "note2" }),
+  createNode({ id: "s1", parentId: "src" }),
+  createNode({ id: "s2", parentId: "src", prevSiblingId: "s1" }),
+]);
+
+test("a moved mirror takes its expanded rows with it: the caret lands past them", () => {
+  const rows = buildVisibleRows(MIRRORED, "note2", () => false, null, true);
+  const moved = new Set(["m"]);
+  expect(columnMoveLanding(rows, MIRRORED, moved, "note2")).toBe("x");
+});
+
+test("a remembered row inside a mirror still anchors the slot", () => {
+  const s1Key = rowKeyFor("m", "s1");
+  expect(columnMoveSlot(MIRRORED, "note2", s1Key, new Set(["o"]))).toEqual({
+    parentId: "src",
+    afterId: "s1",
+  });
+});
+
+test("a locked parent falls back to the end; a mirror root ends after its source's children", () => {
+  expect(columnMoveSlot(MIRRORED, "note2", "l1", new Set(["o"]))).toEqual({
+    parentId: "note2",
+    afterId: "lk",
+  });
+  expect(columnMoveSlot(MIRRORED, "m", null, new Set(["o"]))).toEqual({
+    parentId: "m",
+    afterId: "s2",
+  });
 });

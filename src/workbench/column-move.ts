@@ -1,6 +1,10 @@
-import type { VisibleRow } from "../data/visible-order";
-
-import { childrenOf, type TreeIndex } from "../data/tree";
+import {
+  childrenOf,
+  isNodeLocked,
+  trueSourceOf,
+  type TreeIndex,
+} from "../data/tree";
+import { parseRowKey, type VisibleRow } from "../data/visible-order";
 
 /**
  * Where Ctrl+Alt+←/→ puts nodes, and where the caret goes after
@@ -8,17 +12,16 @@ import { childrenOf, type TreeIndex } from "../data/tree";
  * workbench host applies them (column-move-action.ts).
  */
 
-/** Whether `id` is `ancestorId` or sits inside it (null = the whole outline). */
-function isWithin(
+/** Whether `id` is in `set` or sits inside one of them. */
+function isWithinAny(
   index: TreeIndex,
   id: string,
-  ancestorId: string | null,
+  set: ReadonlySet<string | null>,
 ): boolean {
-  if (ancestorId === null) return index.byId.has(id);
   let cursor: string | null = id;
   let guard = index.byId.size + 1;
   while (cursor !== null && guard-- > 0) {
-    if (cursor === ancestorId) return true;
+    if (set.has(cursor)) return true;
     cursor = index.byId.get(cursor)?.parentId ?? null;
   }
   return false;
@@ -31,28 +34,39 @@ export interface ColumnSlot {
 }
 
 /**
- * The slot in the target column: right after the node it last had the caret
- * in, as that node's next sibling -- provided that node is still inside the
- * column's zoom root, isn't the root itself (its siblings are outside the
- * view), and isn't one of the moved nodes or inside them. Otherwise the end
- * of the zoom root.
+ * The slot in the target column: right after the row it last had the caret
+ * in, as that row's next sibling -- provided the row (a render key: a path
+ * through any mirrors on the way) is still inside the column's zoom root,
+ * isn't the root itself (its siblings are outside the view), isn't one of
+ * the moved nodes or inside them, and its parent takes children (not
+ * locked). Otherwise the end of the zoom root (its source's children, when
+ * the root is a mirror).
  */
 export function columnMoveSlot(
   index: TreeIndex,
   targetRootId: string | null,
-  lastFocusedId: string | null,
+  lastFocusedKey: string | null,
   moved: ReadonlySet<string>,
 ): ColumnSlot {
-  const anchor = lastFocusedId ? index.byId.get(lastFocusedId) : undefined;
+  const path = lastFocusedKey ? parseRowKey(lastFocusedKey) : [];
+  const anchor = index.byId.get(path.at(-1) ?? "");
+  const inView =
+    path.length > 0 &&
+    (targetRootId === null
+      ? index.byId.has(path[0]!)
+      : isWithinAny(index, path[0]!, new Set([targetRootId])));
   if (
     anchor &&
+    inView &&
     anchor.id !== targetRootId &&
-    isWithin(index, anchor.id, targetRootId) &&
-    ![...moved].some((id) => isWithin(index, anchor.id, id))
+    !path.some((id) => isWithinAny(index, id, moved)) &&
+    !(anchor.parentId !== null && isNodeLocked(index, anchor.parentId))
   ) {
     return { parentId: anchor.parentId, afterId: anchor.id };
   }
-  const kids = childrenOf(index, targetRootId).filter((n) => !moved.has(n.id));
+  const content =
+    targetRootId === null ? null : trueSourceOf(index, targetRootId);
+  const kids = childrenOf(index, content).filter((n) => !moved.has(n.id));
   return { parentId: targetRootId, afterId: kids.at(-1)?.id ?? null };
 }
 
@@ -60,7 +74,9 @@ export function columnMoveSlot(
  * Where the caret lands in the source column once `moved` leave it: the first
  * row after the moved block, else the last row before it, else the moved
  * nodes' parent (null when that's the view's own root or the top level --
- * the caller then focuses nothing new).
+ * the caller then focuses nothing new). A row is in the block when any node
+ * on its render path is a moved node or inside one (a moved mirror takes its
+ * expanded source rows with it).
  */
 export function columnMoveLanding(
   rows: readonly VisibleRow[],
@@ -69,7 +85,7 @@ export function columnMoveLanding(
   rootId: string | null,
 ): string | null {
   const inside = (row: VisibleRow) =>
-    [...moved].some((id) => isWithin(index, row.id, id));
+    parseRowKey(row.key).some((id) => isWithinAny(index, id, moved));
   const first = rows.findIndex(inside);
   if (first < 0) return null;
   let last = first;

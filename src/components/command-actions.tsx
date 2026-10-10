@@ -33,10 +33,10 @@ import { useMemo } from "react";
 
 import type { CommandCenterAction } from "../data/command-center";
 
+import { getCommandCenterAmbientRowKey } from "../data/command-bridge";
 import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
-import { getActivePaneId, getPaneFocus } from "../data/panes";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
 import { moveToAdjacentColumn } from "../workbench/column-move-action";
@@ -279,7 +279,7 @@ export function useGlobalActions(opts: {
         hotkey: ["⌃", "⌥", "←"],
         disabled: paneCount < 2,
         run: () =>
-          void moveToAdjacentColumn(-1, getPaneFocus(getActivePaneId())),
+          void moveToAdjacentColumn(-1, getCommandCenterAmbientRowKey()),
       },
       {
         id: "g:move-right",
@@ -292,7 +292,7 @@ export function useGlobalActions(opts: {
         hotkey: ["⌃", "⌥", "→"],
         disabled: paneCount < 2,
         run: () =>
-          void moveToAdjacentColumn(1, getPaneFocus(getActivePaneId())),
+          void moveToAdjacentColumn(1, getCommandCenterAmbientRowKey()),
       },
       {
         id: "g:sidebar",
