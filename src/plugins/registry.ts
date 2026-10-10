@@ -28,6 +28,7 @@ import type {
   PointerInteractionEvent,
   SearchAction,
   SearchActionContext,
+  SidebarEntrySpec,
   SlotPosition,
   SlotSpec,
   TokenSpec,
@@ -473,6 +474,13 @@ export let subheaderSlots: SubheaderSlotSpec[] = [];
  *  order. Optional editor features disappear from this list when switched off. */
 export let externalDropTargets: ExternalDropTargetSpec[] = [];
 
+// --- Seam S: workbench sidebar entries -------------------------------------
+
+/** Fixed sidebar entries, in plugin array order. Optional editor features
+ *  disappear from this list when switched off. Read through
+ *  {@link usePluginChrome} so the sidebar re-renders on a preference change. */
+export let sidebarEntries: SidebarEntrySpec[] = [];
+
 // --- Protected nodes --------------------------------------------------------
 
 const protectPredicates = plugins
@@ -609,6 +617,7 @@ let chrome = {
   commandSpecs,
   selectionCommandSpecs,
   aliasProviders,
+  sidebarEntries,
 };
 export function usePluginChrome() {
   return useSyncExternalStore(
@@ -650,6 +659,7 @@ function refreshOptionalSeams(
   headerSlots = active.flatMap((p) => p.headerSlots ?? []);
   subheaderSlots = active.flatMap((p) => p.subheaderSlots ?? []);
   externalDropTargets = active.flatMap((p) => p.externalDropTargets ?? []);
+  sidebarEntries = active.flatMap((p) => p.sidebarEntries ?? []);
   slotsByPosition = new Map();
   for (const slot of active.flatMap((p) => p.slots ?? [])) {
     const slots = slotsByPosition.get(slot.position);
@@ -675,6 +685,7 @@ function refreshOptionalSeams(
     commandSpecs,
     selectionCommandSpecs,
     aliasProviders,
+    sidebarEntries,
   };
 }
 subscribeEditorFeatures(() => {

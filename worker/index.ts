@@ -180,6 +180,8 @@ const KV_COLLECTIONS = new Set([
   "changelog",
   "saved-queries",
   "account-prefs",
+  // The workbench sidebar's folders and notes (docs/workbench/PLAN.md 2.5).
+  "library",
 ]);
 
 /**

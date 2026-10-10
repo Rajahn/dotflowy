@@ -105,6 +105,9 @@ export interface ZoomIntent {
   pivotId: string | null;
   focusLast: boolean;
   scroll: "top" | "restore";
+  /** Focus the zoomed title with its text selected (a new note, ready to be
+   *  named). */
+  selectTitle: boolean;
 }
 
 const intents = new Map<string, ZoomIntent>();
@@ -126,6 +129,7 @@ function setIntent(tabId: string, intent: Partial<ZoomIntent>): void {
     pivotId: null,
     focusLast: false,
     scroll: "top",
+    selectTitle: false,
     ...intent,
   });
 }
@@ -208,7 +212,11 @@ function withZoomTransition(update: () => void): void {
 export function zoomPane(
   paneId: string,
   rootId: string | null,
-  opts: { pivot?: string | null; transition?: boolean } = {},
+  opts: {
+    pivot?: string | null;
+    transition?: boolean;
+    selectTitle?: boolean;
+  } = {},
 ): void {
   const zoomed = (from: WorkbenchState) => {
     const tab = activeTab(from, paneId);
@@ -222,7 +230,10 @@ export function zoomPane(
   const apply = () => {
     const change = zoomed(state);
     if (!change) return;
-    setIntent(change.tab.id, { pivotId: opts.pivot ?? null });
+    setIntent(change.tab.id, {
+      pivotId: opts.pivot ?? null,
+      selectTitle: opts.selectTitle ?? false,
+    });
     scrollMemory.delete(scrollKey(change.tab.id, rootId));
     if (paneId === getActivePaneId()) urlWrite = "push";
     commit(change.next);
