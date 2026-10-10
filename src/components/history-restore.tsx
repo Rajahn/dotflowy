@@ -28,6 +28,7 @@ import {
   NodesTimeoutError,
   runPromise,
 } from "../data/nodes-client-effect";
+import { getActivePaneId, paneElement } from "../data/panes";
 import { getSelectionState, selectSingle } from "../data/selection-state";
 import { runStructuralTracked, runStructuralSliced } from "../data/structural";
 import { getTreeIndex } from "../data/tree-store";
@@ -436,9 +437,10 @@ export function HistoryRestoreDialog() {
           setPendingCaretSelection(key, plan.location.caret);
         getNodeActionBridge()?.focusNode(key);
         yield* afterRenderE;
-        const el = document.querySelector<HTMLElement>(
-          `[data-history-key="${CSS.escape(key)}"]`,
-        );
+        // The active pane's row: the same node may render in two panes.
+        const el = (
+          paneElement(getActivePaneId()) ?? document
+        ).querySelector<HTMLElement>(`[data-history-key="${CSS.escape(key)}"]`);
         if (!el) return;
         el.focus({ preventScroll: true });
         el.scrollIntoView({ block: "nearest" });

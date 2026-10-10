@@ -1,8 +1,4 @@
-import {
-  useHotkey,
-  useHotkeys,
-  type UseHotkeyDefinition,
-} from "@tanstack/react-hotkeys";
+import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import {
   Link,
   useLocation,
@@ -69,6 +65,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
+import { paneElement, useIsActivePane } from "../data/panes";
 import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
 import { useSyncSelectionFillRows } from "../data/selection-fill";
@@ -94,9 +91,9 @@ import {
   useVisibleRows,
 } from "../data/tree-store";
 import {
-  getViewFilter,
-  getViewIsHidden,
-  getViewRootId,
+  getViewFilterFor,
+  getViewIsHiddenFor,
+  getViewRootIdFor,
   useSyncViewFilter,
   useSyncViewState,
 } from "../data/view-state";
@@ -128,6 +125,8 @@ import {
   useIsProtected,
   useViewFilter,
 } from "../plugins/registry";
+import { registerPaneActions } from "../workbench/pane-actions";
+import { usePaneId } from "../workbench/pane-context";
 import { Backlinks } from "./backlinks";
 import { TitleParagraphGlyph } from "./bullet-glyph";
 import {
@@ -165,7 +164,6 @@ import { OutlineRow } from "./OutlineRow";
 import {
   copySourceSelection,
   cutSourceSelection,
-  installLiteralPasteArm,
   pasteIntoBullet,
 } from "./paste";
 import {
@@ -259,6 +257,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // rows stay memoized and a keystroke still re-renders only its own bullet.
   "use no memo";
   const navigate = useNavigate();
+  // The workbench pane this editor renders in. Every event-time read of view
+  // state, virtual nav and the command bridge goes through it, so two columns
+  // never answer for each other (docs/workbench/PLAN.md 2.2).
+  const paneId = usePaneId();
+  // Page-singleton chrome (the mobile actions bar, the selection toolbar) both
+  // listen on `document`; only the active pane mounts them, so N columns never
+  // stack N copies over one caret.
+  const isActivePane = useIsActivePane(paneId);
   const { showCompleted } = useShowCompleted();
   // Spotlight breathing room (ADR 0060): top padding mirrors the bottom
   // `mb-[50vh]` so a short outline floats near the vertical center instead of
@@ -305,15 +311,10 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // time without depending on this render -- the same seam getTreeIndex() gives
   // the tree (ADR 0014). The write runs in an effect, so nothing writes a ref
   // during render. Render reads below use `rootId`/`isHidden` directly.
-  useSyncViewState(rootId, isHidden);
+  useSyncViewState(paneId, rootId, isHidden);
 
-  // Mod+Shift+V arms the literal paste (ADR 0044). A window listener, not three
-  // element ones: bullets AND the zoomed title paste, and the chord has to be
-  // seen on its keydown -- the `paste` event that follows carries no modifiers.
-  useEffect(() => installLiteralPasteArm(), []);
-
-  // Focus plumbing: the id->contentEditable registry, the post-render focus/
-  // flash pass, and undo/redo (which restore focus where the action left it).
+  // Focus plumbing: the id->contentEditable registry and the post-render focus/
+  // flash pass.
   // The refs are returned so the command closures + drag can write them. See
   // useOutlineFocus.
   const {
@@ -338,7 +339,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Zoom navigation: the shared-element morph between a node's title and list-
   // item roles, Cmd+, zoom-out, the current pivot id, and the post-navigation
   // focus landing. See useZoomNavigation.
-  const { navigateZoom, pivotId } = useZoomNavigation({
+  const { navigateZoom, zoomOut, pivotId } = useZoomNavigation({
+    paneId,
     rootId,
     isHidden,
     refs,
@@ -347,6 +349,33 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFlash,
     focusLast,
   });
+
+  // Undo, redo and zoom-out are window chords the workbench host registers
+  // ONCE and dispatches to the active pane (pane-actions.ts); this editor
+  // publishes what they do here. Undo/redo replay a snapshot diff as a mix of
+  // insert/update/delete -- the same multi-node relink a structural mutation
+  // does, so they ride the same atomic batch (one frame, held until echo).
+  // runHistoryRestore picks the apply path by diff size: small diffs stay
+  // synchronous (this must not regress the keystroke-adjacent path); huge ones
+  // (undoing a 17k-node import/delete) stream through runStructuralSliced
+  // behind a modal progress dialog. The focused id is handed in so redo can
+  // return focus where the action left it; the restored id becomes the next
+  // pending focus.
+  useEffect(
+    () =>
+      registerPaneActions(paneId, {
+        undo: () =>
+          runHistoryRestore("undo", findFocusedId(), (id) => {
+            pendingFocus.current = id;
+          }),
+        redo: () =>
+          runHistoryRestore("redo", findFocusedId(), (id) => {
+            pendingFocus.current = id;
+          }),
+        zoomOut,
+      }),
+    [paneId, findFocusedId, pendingFocus, zoomOut],
+  );
 
   // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
   // plain mousedown would place an editing caret; we block that and route the
@@ -450,12 +479,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // live values through getters (the same ref pattern the commands use), and
   // commits through the one fused `moveNode` mutation. See ADR 0010.
   const drag = useDragReorder({
+    paneId,
     getIndex: getTreeIndex,
-    getRootId: getViewRootId,
-    getIsHidden: getViewIsHidden,
-    // The active `?q=` filter, so the drag's row model is exactly the filtered
+    getRootId: () => getViewRootIdFor(paneId),
+    getIsHidden: () => getViewIsHiddenFor(paneId),
+    // This pane's `?q=` filter, so the drag's row model is exactly the filtered
     // rows the render shows (issue #244 / the ADR 0047 amendment).
-    getFilter: getViewFilter,
+    getFilter: () => getViewFilterFor(paneId),
     getRowEl: (key) =>
       // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
       (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ?? null,
@@ -491,11 +521,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           // the active filter's visible set (e.g. a match-descendant dragged
           // under a non-matching context ancestor, or into a collapsed match)
           // leaves it unrendered -- pendingFlash then harmlessly no-ops. RECOMPUTE
-          // the filter against the post-move tree (getViewFilter()'s visibleIds
+          // the filter against the post-move tree (getViewFilterFor()'s visibleIds
           // is the pre-move set, so it can't answer this), then toast so the move
           // isn't silent. Fresh index off the live store, the focusKeyFor /
           // paste-resolveSeam technique (getTreeIndex()'s notify can lag).
-          if (getViewFilter()) {
+          if (getViewFilterFor(paneId)) {
             const fresh = buildTreeIndex(getLiveNodes());
             const recomputed = buildViewFilter(fresh, viewCtx, isHidden);
             // Test the post-move render address, not another copy of this node.
@@ -516,6 +546,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // live value it needs is read through a ref or is itself stable. See
   // useNodeCommands.
   const commands = useNodeCommands({
+    paneId,
     refs,
     pendingFocus,
     pendingFocusAtStart,
@@ -587,17 +618,17 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           el.focus({ preventScroll: true });
           el.scrollIntoView({ block: "nearest" });
           pendingFocus.current = null;
-        } else if (!scrollRowIntoView(id)) pendingFocus.current = null;
+        } else if (!scrollRowIntoView(id, "center", paneId))
+          pendingFocus.current = null;
       });
     };
-    setNodeActionBridge({
+    return setNodeActionBridge(paneId, {
       commands,
       getCtx: pluginCtx,
       findFocusedId,
       focusNode,
     });
-    return () => setNodeActionBridge(null);
-  }, [commands, pluginCtx, findFocusedId, refs, pendingFocus]);
+  }, [paneId, commands, pluginCtx, findFocusedId, refs, pendingFocus]);
 
   // Zero-arg command surface for the mobile actions bar (ADR 0030). A thin facade
   // over the same `commands`/`undo`/`redo` the keyboard uses; each method resolves
@@ -621,7 +652,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // Node multi-selection (ADR 0018): the while-selected keyboard handler + the
   // actions menu's ops. Installs window key/mouse listeners only while a
   // selection is active, and clears any stale selection on this view's mount.
-  const selection = useSelectionMode({ refs, pendingFocus });
+  const selection = useSelectionMode({ paneId, refs, pendingFocus });
 
   // The pruned visible-set for the active filter (matches + ancestor context),
   // or null when no filter. A plugin-contributed Seam-G transform (the tags
@@ -633,7 +664,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const filter = useViewFilter(viewCtx, isHidden, focusedFilterKey);
   // Mirrored for event-time reads: a structural paste asks, after it lands,
   // whether the bullets it created are actually on screen (ADR 0044).
-  useSyncViewFilter(filter);
+  useSyncViewFilter(paneId, filter);
   const noMatches = filter !== null && filter.matchIds.size === 0;
 
   const zoomedNode = useNode(rootId ?? "") ?? null;
@@ -698,7 +729,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         } else {
           pendingFocus.current = key;
           pendingFocusAtStart.current = true;
-          scrollRowIntoView(key);
+          scrollRowIntoView(key, "center", paneId);
         }
       } else {
         // A genuinely empty Home still has its add control. A filtered empty
@@ -707,13 +738,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
           listRef.current?.parentElement?.querySelector<HTMLButtonElement>(
             "[data-outline-add]",
           );
-        const input = document.querySelector<HTMLInputElement>(
+        // This pane's filter input -- another column has its own.
+        const input = paneElement(paneId)?.querySelector<HTMLInputElement>(
           'input[aria-label="Filter query"]',
         );
         (add ?? input)?.focus({ preventScroll: true });
       }
     },
-    [refs, rootId, pendingFocus, pendingFocusAtStart],
+    [paneId, refs, rootId, pendingFocus, pendingFocusAtStart],
   );
   const eligibleRows = useCallback(() => {
     const index = getTreeIndex();
@@ -740,7 +772,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // `useSelectionFill` read covers its visible descendants, not just a selected
   // root -- the flat list has no DOM nesting for a root's tint to paint behind
   // its children. See selection-fill.ts.
-  useSyncSelectionFillRows(rows);
+  useSyncSelectionFillRows(paneId, rows);
 
   // Landing the caret when spotlight turns ON (ADR 0060): a node already
   // holding focus keeps it (the engine centers it); otherwise the zoom root's
@@ -773,12 +805,13 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       applyPendingCaret(el, key, true);
       pendingFocus.current = null;
       pendingFocusAtStart.current = false;
-    } else if (!scrollRowIntoView(key)) {
+    } else if (!scrollRowIntoView(key, "center", paneId)) {
       pendingFocus.current = null;
       pendingFocusAtStart.current = false;
       clearPendingCaretOffset();
     }
   }, [
+    paneId,
     spotlight,
     loading,
     zoomedNode,
@@ -866,14 +899,15 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // effects run, so an off-screen target is actually scrolled in rather than
   // silently dropped. The row index is also published in the layout phase,
   // before a focus pass can resolve a newly inserted or reparented address.
-  useLayoutEffect(() => {
-    setVirtualNav({
-      scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
-      indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
-      measurementAt: (i) => virtualizer.measurementsCache[i],
-    });
-    return () => setVirtualNav(null);
-  }, [virtualizer]);
+  useLayoutEffect(
+    () =>
+      setVirtualNav(paneId, {
+        scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
+        indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
+        measurementAt: (i) => virtualizer.measurementsCache[i],
+      }),
+    [paneId, virtualizer],
+  );
 
   // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && hasNodes) {
@@ -889,13 +923,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   return (
     <>
       <FocusPass
+        paneId={paneId}
         ready={presentationReady}
         refs={refs}
         pendingFocus={pendingFocus}
         pendingFocusAtStart={pendingFocusAtStart}
         pendingFlash={pendingFlash}
       />
-      <SelectionActionsMenu ops={selection.ops} getCtx={pluginCtx} />
+      {/* One menu per page: only the active pane (where the selection was
+          made) anchors it. */}
+      {isActivePane && (
+        <SelectionActionsMenu
+          ops={selection.ops}
+          getCtx={pluginCtx}
+          paneId={paneId}
+        />
+      )}
       <div
         className="outline-chrome relative sticky top-0 z-10"
         ref={headerRef}
@@ -933,15 +976,19 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         {/* Mobile-only keyboard-anchored action strip. Mounts only on a coarse
             pointer and only while a bullet is focused (both gated inside the
             component), so on desktop this renders nothing. ADR 0030. */}
-        <MobileActionsBar
-          actions={mobileBarActions}
-          findFocusedId={findFocusedId}
-        />
+        {isActivePane && (
+          <MobileActionsBar
+            actions={mobileBarActions}
+            findFocusedId={findFocusedId}
+          />
+        )}
 
         {/* Desktop-only formatting toolbar over a text selection (ADR 0036).
             Gates itself on a fine pointer + a single-span selection, so it
             renders nothing on touch or when nothing is selected. */}
-        <SelectionFormatToolbar actions={selectionFormatActions} />
+        {isActivePane && (
+          <SelectionFormatToolbar actions={selectionFormatActions} />
+        )}
 
         {overlayNode}
 
@@ -1134,9 +1181,9 @@ interface OutlineFocus {
 }
 
 /**
- * Focus plumbing for the editor: the id->span registry, the after-render focus/
- * flash pass, and undo/redo (which restore focus to the node the undone action
- * left it on). Split out of OutlineEditor so the body stays readable; the refs
+ * Focus plumbing for the editor: the id->span registry and the after-render
+ * focus/flash pass (undo/redo, which restore focus to the node the undone
+ * action left it on, are published as pane actions by the editor). Split out of OutlineEditor so the body stays readable; the refs
  * are returned so the command closures and drag can write them. See ADR 0014.
  */
 function useOutlineFocus(): OutlineFocus {
@@ -1184,33 +1231,6 @@ function useOutlineFocus(): OutlineFocus {
     return null;
   }, [refs]);
 
-  // Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z: undo/redo, owning history over the browser's
-  // native contentEditable undo (preventDefault). The focused id is handed in so
-  // redo can return focus where the action left it; the restored id becomes the
-  // next pending focus.
-  // undo/redo replay a snapshot diff as a mix of insert/update/delete -- the
-  // same multi-node relink a structural mutation does, so they ride the same
-  // atomic batch (one frame, held until echo). runHistoryRestore picks the
-  // apply path by diff size: small diffs stay synchronous (this must not regress
-  // the keystroke-adjacent path); huge ones (undoing a 17k-node import/delete)
-  // stream through runStructuralSliced behind a modal progress dialog.
-  useHotkey(
-    "Mod+Z",
-    () =>
-      runHistoryRestore("undo", findFocusedId(), (id) => {
-        pendingFocus.current = id;
-      }),
-    { preventDefault: true },
-  );
-  useHotkey(
-    "Mod+Shift+Z",
-    () =>
-      runHistoryRestore("redo", findFocusedId(), (id) => {
-        pendingFocus.current = id;
-      }),
-    { preventDefault: true },
-  );
-
   return {
     refs,
     registerRef,
@@ -1236,12 +1256,14 @@ function useOutlineFocus(): OutlineFocus {
  * subscription keeps the pass correct without re-rendering the expensive shell.
  */
 function FocusPass({
+  paneId,
   ready,
   refs,
   pendingFocus,
   pendingFocusAtStart,
   pendingFlash,
 }: {
+  paneId: string;
   ready: boolean;
   refs: Map<string, HTMLSpanElement | null>;
   pendingFocus: RefObject<string | null>;
@@ -1262,7 +1284,7 @@ function FocusPass({
         applyPendingCaret(el, fid, pendingFocusAtStart.current);
         pendingFocus.current = null;
         pendingFocusAtStart.current = false;
-      } else if (!scrollRowIntoView(fid)) {
+      } else if (!scrollRowIntoView(fid, "center", paneId)) {
         // Not windowed (or the id isn't a visible row): nothing to mount later,
         // so clear to avoid a stuck pending. When windowed and off-screen, leave
         // it set -- OutlineRow claims it in its mount effect once scrolled in.
@@ -1277,7 +1299,7 @@ function FocusPass({
       if (el) {
         flashRow(el.closest(".outline-row"));
         pendingFlash.current = null;
-      } else if (!scrollRowIntoView(flid)) {
+      } else if (!scrollRowIntoView(flid, "center", paneId)) {
         pendingFlash.current = null;
       }
     }
@@ -1286,6 +1308,7 @@ function FocusPass({
 }
 
 interface ZoomNavigationArgs {
+  paneId: string;
   rootId: string | null;
   isHidden: (node: Node) => boolean;
   refs: Map<string, HTMLSpanElement | null>;
@@ -1303,11 +1326,12 @@ interface ZoomNavigationArgs {
 /**
  * Zoom navigation: the shared-element morph between a node's title and list-item
  * roles, Cmd+, zoom-out, and the focus landing after a navigation. Returns the
- * stable `navigateZoom` and the current pivot id. The mount-only effects rely on
+ * stable `navigateZoom`, the Cmd+, `zoomOut`, and the current pivot id. The mount-only effects rely on
  * the editor remounting per zoom view (its `key={nodeId}`; see
  * docs/architecture.md "`rootId` is route-owned").
  */
 function useZoomNavigation({
+  paneId,
   rootId,
   isHidden,
   refs,
@@ -1375,16 +1399,14 @@ function useZoomNavigation({
   // Cmd/Ctrl+,: zoom out one level -- navigate to the current root's parent,
   // with the current root as the morph pivot (title -> list item). No-op at the
   // top. Mirror of Cmd+. (zoom in). Keyed off rootId, not the focused node.
-  useHotkey(
-    "Mod+,",
-    () => {
-      const currentRoot = getViewRootId();
-      if (currentRoot === null) return;
-      const node = getTreeIndex().byId.get(currentRoot);
-      navigateZoom(node?.parentId ?? null, currentRoot);
-    },
-    { preventDefault: true },
-  );
+  // Registered once by the workbench host and dispatched to the active pane
+  // (pane-actions.ts), so it is returned here rather than bound as a hotkey.
+  const zoomOut = useCallback(() => {
+    const currentRoot = getViewRootIdFor(paneId);
+    if (currentRoot === null) return;
+    const node = getTreeIndex().byId.get(currentRoot);
+    navigateZoom(node?.parentId ?? null, currentRoot);
+  }, [paneId, navigateZoom]);
 
   // After a zoom, drop focus where the user is most likely to continue:
   //  - Zooming IN (pivotId === rootId): the first visible child of the opened
@@ -1406,7 +1428,7 @@ function useZoomNavigation({
       if (!lastChild) return;
       const el = refs.get(lastChild.id);
       if (!el) {
-        if (scrollRowIntoView(lastChild.id))
+        if (scrollRowIntoView(lastChild.id, "center", paneId))
           pendingFocus.current = lastChild.id;
         return;
       }
@@ -1434,7 +1456,7 @@ function useZoomNavigation({
         el.scrollIntoView({ block: "nearest" });
         return;
       }
-      if (scrollRowIntoView(targetId)) {
+      if (scrollRowIntoView(targetId, "center", paneId)) {
         pendingFocus.current = targetId;
         return;
       }
@@ -1456,7 +1478,7 @@ function useZoomNavigation({
     const el = refs.get(flashId);
     if (!el) {
       // Windowed + off-screen: scroll in, claim focus + flash on mount.
-      if (scrollRowIntoView(flashId)) {
+      if (scrollRowIntoView(flashId, "center", paneId)) {
         pendingFocus.current = flashId;
         pendingFlash.current = flashId;
       }
@@ -1471,7 +1493,7 @@ function useZoomNavigation({
     // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
 
-  return { navigateZoom, pivotId };
+  return { navigateZoom, zoomOut, pivotId };
 }
 
 /**
@@ -1596,6 +1618,9 @@ function useSelectionFormatActions({
 }
 
 interface NodeCommandsArgs {
+  /** The pane these commands act in: view state and virtual nav are read for
+   *  it, never for whichever pane happens to be active. */
+  paneId: string;
   refs: Map<string, HTMLSpanElement | null>;
   pendingFocus: RefObject<string | null>;
   pendingFocusAtStart: RefObject<boolean>;
@@ -1614,6 +1639,7 @@ interface NodeCommandsArgs {
  * through a ref or is itself stable. See ADR 0014.
  */
 function useNodeCommands({
+  paneId,
   refs,
   pendingFocus,
   pendingFocusAtStart,
@@ -1796,7 +1822,8 @@ function useNodeCommands({
               // Don't let a direct child of the zoom root outdent past it; that
               // would move it out of the visible subtree and look like it vanished.
               const node = getTreeIndex().byId.get(instanceId);
-              if (node && node.parentId === getViewRootId()) return null;
+              if (node && node.parentId === getViewRootIdFor(paneId))
+                return null;
               // Same remount-drops-focus issue as indent; re-focus on a real move.
               capture(getTreeIndex(), activeKey, null, { label: "outdent" });
               if (outdent(getTreeIndex(), instanceId))
@@ -1822,8 +1849,8 @@ function useNodeCommands({
               // Reorder/outdent remounts the contentEditable; re-focus on a real move.
               capture(getTreeIndex(), activeKey, null, { label: "move" });
               const moved = moveUp(getTreeIndex(), instanceId, {
-                isVisible: (n) => !getViewIsHidden()(n),
-                rootId: getViewRootId(),
+                isVisible: (n) => !getViewIsHiddenFor(paneId)(n),
+                rootId: getViewRootIdFor(paneId),
                 resolveMirror: isMirrorsEnabled(),
               });
               if (moved) return { instanceId, activeKey };
@@ -1849,8 +1876,8 @@ function useNodeCommands({
               const instanceId = instanceIdForKey(activeKey);
               capture(getTreeIndex(), activeKey, null, { label: "move" });
               const moved = moveDown(getTreeIndex(), instanceId, {
-                isVisible: (n) => !getViewIsHidden()(n),
-                rootId: getViewRootId(),
+                isVisible: (n) => !getViewIsHiddenFor(paneId)(n),
+                rootId: getViewRootIdFor(paneId),
                 resolveMirror: isMirrorsEnabled(),
               });
               if (moved) return { instanceId, activeKey };
@@ -1927,11 +1954,11 @@ function useNodeCommands({
             // parent) only when nothing is above -- the first visible row.
             const above = findVisibleNeighbor(
               idx,
-              getViewRootId(),
+              getViewRootIdFor(paneId),
               activeKey,
               "up",
-              getViewIsHidden(),
-              getViewFilter(),
+              getViewIsHiddenFor(paneId),
+              getViewFilterFor(paneId),
               mirrorsOn,
             );
             const focusId = removeNode(idx, instanceId);
@@ -1969,9 +1996,9 @@ function useNodeCommands({
           const plan = planJoinPrevious(
             idx,
             activeKey,
-            getViewRootId(),
-            getViewIsHidden(),
-            getViewFilter(),
+            getViewRootIdFor(paneId),
+            getViewIsHiddenFor(paneId),
+            getViewFilterFor(paneId),
             mirrorsOn,
           );
           // A refusal is never silent: the row shakes, and where the reason
@@ -2126,11 +2153,11 @@ function useNodeCommands({
           const from = findFocusedId() ?? id;
           const target = findVisibleNeighbor(
             getTreeIndex(),
-            getViewRootId(),
+            getViewRootIdFor(paneId),
             from,
             direction,
-            getViewIsHidden(),
-            getViewFilter(),
+            getViewIsHiddenFor(paneId),
+            getViewFilterFor(paneId),
             isMirrorsEnabled(),
           );
           if (!target) return;
@@ -2140,7 +2167,7 @@ function useNodeCommands({
             if (x != null) placeCaretAtColumn(el, direction, x);
             else if (direction === "down") placeCaretAtStart(el);
             else placeCaretAtEnd(el);
-          } else if (scrollRowIntoView(target)) {
+          } else if (scrollRowIntoView(target, "center", paneId)) {
             // Crossed the window edge: the neighbor row isn't mounted. Scroll it
             // in and let its mount effect claim focus (column intent is lost on
             // this rare edge case -- land at the leading edge of the entry side).
@@ -2170,12 +2197,13 @@ function useNodeCommands({
     },
     // commands MUST keep stable identity (a prop on every memoized OutlineRow,
     // ADR 0014). The live tree is read via getTreeIndex() and the live view
-    // state via getViewRootId()/getViewIsHidden() (view-state.ts) at call time,
-    // and the remaining live values through refs (refs/pendingFocus/...), so the
-    // only real deps are the three stable callbacks; the module getters and the
-    // flagged ref captures can't be listed and would defeat the pattern.
+    // state via getViewRootIdFor()/getViewIsHiddenFor() (view-state.ts) at call
+    // time, and the remaining live values through refs (refs/pendingFocus/...),
+    // so the only real deps are the pane id and the three stable callbacks; the
+    // module getters and the flagged ref captures can't be listed and would
+    // defeat the pattern.
     // eslint-disable-next-line react-doctor/exhaustive-deps
-    [navigateZoom, startDrag, consumeClick],
+    [paneId, navigateZoom, startDrag, consumeClick],
   );
 }
 

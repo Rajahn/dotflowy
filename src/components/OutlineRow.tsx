@@ -32,6 +32,7 @@ import {
   useIsProtected,
 } from "../plugins/registry";
 import { hasFoldingToken } from "../plugins/registry";
+import { usePaneId } from "../workbench/pane-context";
 import { BulletGlyph } from "./bullet-glyph";
 import { focusTextFromRowTap } from "./caret-place";
 import { flashRow } from "./flash-node";
@@ -268,7 +269,7 @@ function RowChrome({
   // covered row reads its own value.
   // Keyed by rowKey (the render address), not instance.id, so a windowed mirror
   // descendant and its source's canonical row are independent reads.
-  const selectionFill = useSelectionFill(rowKey);
+  const selectionFill = useSelectionFill(usePaneId(), rowKey);
   // Mirror chrome (ADR 0022, slice 1d). The count is the same for the source row
   // and every instance (they share the content id), so the "appears in N places"
   // badge shows on all of them. `mirrorsOn` is session-fixed, so the hook adds no

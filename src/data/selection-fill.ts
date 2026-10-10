@@ -75,14 +75,25 @@ function computeFillMap(
   return map;
 }
 
-const EMPTY_ROWS: VisibleRow[] = [];
-let rows: VisibleRow[] = EMPTY_ROWS;
-let fillMap: Map<string, SelectionFill> = new Map();
+// One row list + fill map per workbench pane: the same node can render in two
+// panes at different row positions, so each pane's slab is computed against its
+// own flat list. A selection is node-identity based, so a node selected in one
+// pane tints wherever it is visible (the same limitation noted above).
+const rowsByPane = new Map<string, VisibleRow[]>();
+const fillByPane = new Map<string, Map<string, SelectionFill>>();
+const EMPTY_FILL: Map<string, SelectionFill> = new Map();
 const listeners = new Set<() => void>();
 let started = false;
 
+function recomputePane(paneId: string) {
+  fillByPane.set(
+    paneId,
+    computeFillMap(rowsByPane.get(paneId) ?? [], getSelectionState()),
+  );
+}
+
 function recompute() {
-  fillMap = computeFillMap(rows, getSelectionState());
+  for (const paneId of rowsByPane.keys()) recomputePane(paneId);
   for (const l of listeners) l();
 }
 
@@ -99,11 +110,21 @@ function ensureStarted() {
  * React Compiler's ref-during-render bailout; `rows` only changes identity on a
  * structural edit (collapse, insert, move, filter), never on a keystroke.
  */
-export function useSyncSelectionFillRows(nextRows: VisibleRow[]): void {
+export function useSyncSelectionFillRows(
+  paneId: string,
+  nextRows: VisibleRow[],
+): void {
   useEffect(() => {
-    rows = nextRows;
-    recompute();
-  }, [nextRows]);
+    rowsByPane.set(paneId, nextRows);
+    recomputePane(paneId);
+    for (const l of listeners) l();
+  }, [paneId, nextRows]);
+}
+
+/** Drop a closed pane's rows. */
+export function forgetSelectionFillPane(paneId: string): void {
+  rowsByPane.delete(paneId);
+  fillByPane.delete(paneId);
 }
 
 function subscribe(cb: () => void): () => void {
@@ -119,9 +140,11 @@ function subscribe(cb: () => void): () => void {
  * rendered row that should dim during the gesture. Null means the grabbed row
  * is outside the active selection and remains an ordinary single-node drag. */
 export function getSelectionDragSet(
+  paneId: string,
   grabbedKey: string,
 ): { rootIds: string[]; rowKeys: string[] } | null {
   ensureStarted();
+  const fillMap = fillByPane.get(paneId) ?? EMPTY_FILL;
   if (!fillMap.has(grabbedKey)) return null;
   const rootIds = getSelectionState()?.rootIds;
   if (!rootIds || rootIds.length === 0) return null;
@@ -140,7 +163,13 @@ export function getSelectionDragSet(
  * row -- different keys, same id -- are independent reads). Returns null when
  * this row isn't covered.
  */
-export function useSelectionFill(key: string): SelectionFill | null {
-  const getSnapshot = useCallback(() => fillMap.get(key) ?? null, [key]);
+export function useSelectionFill(
+  paneId: string,
+  key: string,
+): SelectionFill | null {
+  const getSnapshot = useCallback(
+    () => fillByPane.get(paneId)?.get(key) ?? null,
+    [paneId, key],
+  );
   return useSyncExternalStore(subscribe, getSnapshot, () => null);
 }

@@ -1,6 +1,8 @@
 import type { NodeCommands } from "../components/node-commands";
 import type { PluginContext } from "../plugins/types";
 
+import { getActivePaneId } from "./panes";
+
 /**
  * Bridge for the Cmd+K command center (the "node-action" half of ADR 0034).
  *
@@ -32,14 +34,24 @@ export interface NodeActionBridge {
   focusNode: (id: string) => void;
 }
 
-let bridge: NodeActionBridge | null = null;
+const bridges = new Map<string, NodeActionBridge>();
 
-/** Called by `OutlineEditor` (publish on mount, `null` on unmount). */
-export function setNodeActionBridge(next: NodeActionBridge | null) {
-  bridge = next;
+/** Called by `OutlineEditor` on mount, once per workbench pane. Returns the
+ *  unpublish, which only clears the pane's entry if it is still this bridge. */
+export function setNodeActionBridge(
+  paneId: string,
+  next: NodeActionBridge,
+): () => void {
+  bridges.set(paneId, next);
+  return () => {
+    if (bridges.get(paneId) === next) bridges.delete(paneId);
+  };
 }
 
-/** Read the live bridge, or `null` when no editor is mounted. */
-export function getNodeActionBridge(): NodeActionBridge | null {
-  return bridge;
+/** Read `paneId`'s live bridge (default: the ACTIVE pane, the one Cmd+K and
+ *  undo act on), or `null` when no editor is mounted there. */
+export function getNodeActionBridge(
+  paneId: string = getActivePaneId(),
+): NodeActionBridge | null {
+  return bridges.get(paneId) ?? null;
 }

@@ -1,7 +1,7 @@
 import type { PluginContext } from "../plugins/types";
 
 import { linkAtOffset, linkUrlAtOffset } from "../data/links";
-import { getViewRootId } from "../data/view-state";
+import { getViewRootIdForElement } from "../data/view-state";
 import { openLinkEditPopover } from "../plugins/links/link-edit-popover";
 import { bibleRefUrlAtOffset } from "../plugins/route-bible/bible";
 import { getCaretOffset, readSource, setCaretOffset } from "./inline-code";
@@ -57,7 +57,7 @@ function openLinkEditAtCaret(
 
   const nodeId =
     el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-    getViewRootId();
+    getViewRootIdForElement(el);
   if (!nodeId) return false;
 
   const rect = caretRect(el);

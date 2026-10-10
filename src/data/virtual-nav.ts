@@ -8,9 +8,16 @@
  * closure can capture. So the editor mirrors both here in an effect, exactly as
  * `view-state.ts` mirrors the zoom root, and the closures read them at call time.
  *
+ * One bridge per workbench pane: each pane's editor publishes its own, and a
+ * helper resolves `paneId` (default: the ACTIVE pane, see `panes.ts`). An
+ * editor's own closures pass their pane explicitly so a focus landing never
+ * scrolls a different column.
+ *
  * Inactive (null-returning no-ops) while no editor is mounted; every helper
  * guards internally, so callers never branch.
  */
+
+import { getActivePaneId } from "./panes";
 
 interface VirtualNav {
   scrollToIndex: (
@@ -28,11 +35,16 @@ interface VirtualNav {
   measurementAt: (index: number) => { start: number; size: number } | undefined;
 }
 
-let nav: VirtualNav | null = null;
+const navs = new Map<string, VirtualNav>();
 
-/** Editor wires this each render (cheap; the virtualizer instance is stable). */
-export function setVirtualNav(next: VirtualNav | null) {
-  nav = next;
+/** Editor wires this on mount (cheap; the virtualizer instance is stable).
+ *  Returns the unpublish, which only clears the pane's bridge if it is still
+ *  this one -- a remounting editor may already have replaced it. */
+export function setVirtualNav(paneId: string, next: VirtualNav): () => void {
+  navs.set(paneId, next);
+  return () => {
+    if (navs.get(paneId) === next) navs.delete(paneId);
+  };
 }
 
 /**
@@ -45,7 +57,9 @@ export function setVirtualNav(next: VirtualNav | null) {
 export function virtualRowRect(
   id: string,
   scrollY: number,
+  paneId: string = getActivePaneId(),
 ): { top: number; height: number } | null {
+  const nav = navs.get(paneId);
   if (!nav) return null;
   const i = nav.indexOf(id);
   if (i < 0) return null;
@@ -63,7 +77,9 @@ export function virtualRowRect(
 export function scrollRowIntoView(
   id: string,
   align: "start" | "center" | "end" | "auto" = "center",
+  paneId: string = getActivePaneId(),
 ): boolean {
+  const nav = navs.get(paneId);
   if (!nav) return false;
   const i = nav.indexOf(id);
   if (i < 0) return false;
