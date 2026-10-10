@@ -350,6 +350,9 @@ function makeSelectionOps({
  * state, so the only effect dep is `active` (toggles the listeners) plus the
  * stable `ops`.
  */
+/** The pane the live selection was made in, or null while idle. */
+let selectionOwner: string | null = null;
+
 export function useSelectionMode({
   refs,
   pendingFocus,
@@ -364,16 +367,27 @@ export function useSelectionMode({
   );
   const active = useIsSelectionActive();
 
-  // Clear any stale selection carried across an editor (re)mount -- the
-  // singleton outlives the per-zoom remount, but a new view starts caret-first.
+  // Clear any stale selection carried across this pane's editor (re)mount --
+  // the singleton outlives the per-zoom remount, but a new view starts
+  // caret-first. Another pane mounting leaves a selection made elsewhere alone.
   useEffect(() => {
-    clearSelection();
+    if (selectionOwner === null || selectionOwner === paneId) clearSelection();
+    // Mount-only: paneId is fixed for an editor.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
+
+  // A selection belongs to the pane it was made in (keyboard selection starts
+  // from a focused bullet, so that pane is active). Only that pane's editor
+  // owns the while-selected window keys and mouse.
+  useEffect(() => {
+    if (active && selectionOwner === null) selectionOwner = getActivePaneId();
+    if (!active) selectionOwner = null;
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (getActivePaneId() !== paneId) return;
+      if ((selectionOwner ?? getActivePaneId()) !== paneId) return;
       const mod = e.metaKey || e.ctrlKey;
       if (e.key === "Escape") {
         e.preventDefault();
@@ -438,7 +452,7 @@ export function useSelectionMode({
     // (whose buttons run a command). A bullet click also focuses it, which
     // clears via onFocus; this covers clicks on empty space too.
     const onDown = (e: MouseEvent) => {
-      if (getActivePaneId() !== paneId) return;
+      if ((selectionOwner ?? getActivePaneId()) !== paneId) return;
       // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="listbox"]')) return;

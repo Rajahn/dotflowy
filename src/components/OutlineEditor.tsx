@@ -361,20 +361,22 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // behind a modal progress dialog. The focused id is handed in so redo can
   // return focus where the action left it; the restored id becomes the next
   // pending focus.
+  const historyActions = useMemo(
+    () => ({
+      undo: () =>
+        runHistoryRestore("undo", findFocusedId(), (id) => {
+          pendingFocus.current = id;
+        }),
+      redo: () =>
+        runHistoryRestore("redo", findFocusedId(), (id) => {
+          pendingFocus.current = id;
+        }),
+    }),
+    [findFocusedId, pendingFocus],
+  );
   useEffect(
-    () =>
-      registerPaneActions(paneId, {
-        undo: () =>
-          runHistoryRestore("undo", findFocusedId(), (id) => {
-            pendingFocus.current = id;
-          }),
-        redo: () =>
-          runHistoryRestore("redo", findFocusedId(), (id) => {
-            pendingFocus.current = id;
-          }),
-        zoomOut,
-      }),
-    [paneId, findFocusedId, pendingFocus, zoomOut],
+    () => registerPaneActions(paneId, { ...historyActions, zoomOut }),
+    [paneId, historyActions, zoomOut],
   );
 
   // Delegated tag-chip interaction. Chips live inside contentEditable text, so a
@@ -637,7 +639,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   const mobileBarActions = useMobileBarActions({
     refs,
     findFocusedId,
-    pendingFocus,
+    history: historyActions,
     commands,
   });
 
@@ -1503,18 +1505,18 @@ function useZoomNavigation({
  * the contentEditable stays focused, which guarantees `findFocusedId()` is
  * non-null at call time. It adds no new mutation path: indent/outdent/complete
  * route through `commands` (inheriting runStructural + protection guards), and
- * undo/redo mirror the useOutlineFocus hotkeys verbatim. Stable identity so the
- * bar's props never change on a keystroke.
+ * undo/redo are the same closures the Mod+Z / Mod+Shift+Z pane actions run.
+ * Stable identity so the bar's props never change on a keystroke.
  */
 function useMobileBarActions({
   refs,
   findFocusedId,
-  pendingFocus,
+  history,
   commands,
 }: {
   refs: Map<string, HTMLSpanElement | null>;
   findFocusedId: () => string | null;
-  pendingFocus: RefObject<string | null>;
+  history: { undo: () => void; redo: () => void };
   commands: NodeCommands;
 }): MobileBarActions {
   return useMemo<MobileBarActions>(() => {
@@ -1533,15 +1535,9 @@ function useMobileBarActions({
         const key = findFocusedId();
         if (key) commands.onOutdent(key);
       },
-      // Verbatim twins of the Mod+Z / Mod+Shift+Z hotkeys in useOutlineFocus.
-      undo: () =>
-        runHistoryRestore("undo", findFocusedId(), (id) => {
-          pendingFocus.current = id;
-        }),
-      redo: () =>
-        runHistoryRestore("redo", findFocusedId(), (id) => {
-          pendingFocus.current = id;
-        }),
+      // The same closures the Mod+Z / Mod+Shift+Z pane actions run.
+      undo: history.undo,
+      redo: history.redo,
       // Flip completion relative to the CONTENT node's current state (mirror-aware,
       // like onDeleteNode); onToggleCompleted enforces the protected-node guard.
       toggleComplete: () => {
@@ -1564,7 +1560,7 @@ function useMobileBarActions({
         document.execCommand("insertText", false, "/");
       },
     };
-  }, [refs, findFocusedId, pendingFocus, commands]);
+  }, [refs, findFocusedId, history, commands]);
 }
 
 /**
@@ -1848,8 +1844,9 @@ function useNodeCommands({
               const instanceId = instanceIdForKey(activeKey);
               // Reorder/outdent remounts the contentEditable; re-focus on a real move.
               capture(getTreeIndex(), activeKey, null, { label: "move" });
+              const isHidden = getViewIsHiddenFor(paneId);
               const moved = moveUp(getTreeIndex(), instanceId, {
-                isVisible: (n) => !getViewIsHiddenFor(paneId)(n),
+                isVisible: (n) => !isHidden(n),
                 rootId: getViewRootIdFor(paneId),
                 resolveMirror: isMirrorsEnabled(),
               });
@@ -1875,8 +1872,9 @@ function useNodeCommands({
               const activeKey = findFocusedId() ?? id;
               const instanceId = instanceIdForKey(activeKey);
               capture(getTreeIndex(), activeKey, null, { label: "move" });
+              const isHidden = getViewIsHiddenFor(paneId);
               const moved = moveDown(getTreeIndex(), instanceId, {
-                isVisible: (n) => !getViewIsHiddenFor(paneId)(n),
+                isVisible: (n) => !isHidden(n),
                 rootId: getViewRootIdFor(paneId),
                 resolveMirror: isMirrorsEnabled(),
               });
