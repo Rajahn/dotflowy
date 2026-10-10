@@ -23,6 +23,7 @@ const node = (id: string, text: string, fields: Partial<Node> = {}): Node => ({
   createdAt: 1,
   updatedAt: 2,
   origin: null,
+  locked: false,
   kind: null,
   ...fields,
 });
