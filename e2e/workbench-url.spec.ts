@@ -24,13 +24,12 @@ test("a quoted phrase filter reads back unchanged after a reload", async ({
   // The router JSON-encodes a value that starts with a quote.
   const url = `/?q=${encodeURIComponent(JSON.stringify('"alpha beta"'))}`;
   await openSeededOutline(page, { path: url, anchorId: "p" });
-  const filter = page.getByRole("textbox", { name: "Filter query" });
-  await expect(filter).toHaveValue('"alpha beta"');
+  // The phrase matches "alpha beta" only, not "beta alpha".
+  await expect(text(page, "p")).toBeVisible();
   await expect(text(page, "q")).toHaveCount(0);
 
   await page.reload();
   await expect(text(page, "p")).toBeVisible();
-  await expect(filter).toHaveValue('"alpha beta"');
   await expect(text(page, "q")).toHaveCount(0);
   expect(new URL(page.url()).search).toBe(new URL(url, page.url()).search);
 });

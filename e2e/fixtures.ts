@@ -27,6 +27,27 @@ export async function openSeededOutline(
       )
     : page.locator(".outline-list");
   await ready.waitFor({ state: "visible" });
+  await settleOutline(page);
+}
+
+/**
+ * Wait out the outline's one-shot entrance (`.outline-reveal`, a short fade
+ * and 4px slide when content replaces the loading skeleton). Geometry read
+ * while it runs is off by up to its offset. Call after the first rows are
+ * visible, before measuring or dragging.
+ */
+export async function settleOutline(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter(
+          (a) =>
+            a instanceof CSSAnimation && a.animationName === "outline-reveal",
+        )
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
 }
 
 /** An element's top in the outline's scroll-content frame (the first pane
