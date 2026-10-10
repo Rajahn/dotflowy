@@ -559,8 +559,10 @@ export function pinActiveTab(): void {
 
 // A write pins the preview tab it lands in (PLAN 1.3): the tab the capture
 // names, or -- for a capture without a location -- the active pane's. A
-// location without a tab (quick-add) writes elsewhere and pins nothing.
-setCaptureListener((location) => {
+// location without a tab (quick-add) writes elsewhere and pins nothing, and
+// so does a write that happened in no row (a sidebar action).
+setCaptureListener((location, placed) => {
+  if (!placed) return;
   const tabId = location
     ? location.tabId
     : activeTab(state, getActivePaneId())?.id;
@@ -593,6 +595,17 @@ export function showForRestore(
   if (tab && zooms) {
     next = updateTab(next, tab.id, (t) => zoomTab(t, { rootId, q: t.q }));
     setIntent(tab.id, { scroll: "top" });
+  } else if (!tab) {
+    // An empty column (the restored note's tab closed when it was deleted):
+    // the undo opens it there again.
+    const opened = openTab(
+      next,
+      targetPane,
+      { rootId, q: "" },
+      { preview: false },
+      newTabId,
+    );
+    if (opened) next = opened.state;
   }
   setActivePaneId(targetPane);
   if (next !== state) {

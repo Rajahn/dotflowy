@@ -48,6 +48,13 @@ export function setNodeActionBridge(
   };
 }
 
+/** Any mounted editor's bridge -- for an action that needs the editor's
+ *  command funnel but no particular view (the sidebar's Rename/Delete while
+ *  the active column is empty). Null when no editor is mounted at all. */
+export function getAnyNodeActionBridge(): NodeActionBridge | null {
+  return bridges.values().next().value ?? null;
+}
+
 /** Read `paneId`'s live bridge (default: the ACTIVE pane, the one Cmd+K and
  *  undo act on), or `null` when no editor is mounted there. */
 export function getNodeActionBridge(

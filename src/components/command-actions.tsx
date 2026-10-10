@@ -38,12 +38,14 @@ import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
+import { useIsMobile } from "../hooks/use-mobile";
 import { signOutAndReload } from "../lib/auth-client";
 import { moveToAdjacentColumn } from "../workbench/column-move-action";
-import { useActivePaneRootId } from "../workbench/hooks";
+import { useActivePaneId, useActivePaneRootId } from "../workbench/hooks";
 import { MAX_PANES } from "../workbench/model";
 import {
   closeActiveTab,
+  cycleTab,
   focusAdjacentPane,
   pinActiveTab,
   splitActivePane,
@@ -91,7 +93,14 @@ export function useGlobalActions(opts: {
   const { index } = useTree();
   // The active pane's zoom root: Cmd+K acts on the pane that had focus.
   const rootId = useActivePaneRootId();
-  const paneCount = useWorkbenchState().panes.length;
+  const workbench = useWorkbenchState();
+  const paneCount = workbench.panes.length;
+  // Tab cycling needs a second tab in the active column.
+  const activePaneId = useActivePaneId();
+  const hasTabs =
+    (workbench.panes.find((p) => p.id === activePaneId)?.tabs.length ?? 0) > 1;
+  // A phone shows one column (PLAN 1.9): no splitting, no column moves.
+  const narrow = useIsMobile();
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const history = useHistoryState();
 
@@ -215,7 +224,8 @@ export function useGlobalActions(opts: {
         run: () => openFilterInput(),
       },
       // Workbench layout (docs/workbench/PLAN.md 1.3, 1.5). Every shortcut
-      // also lives here, so a chord is never the only way in.
+      // but focus-column-by-number (focus left/right covers it) also lives
+      // here, so a chord is never the only way in.
       {
         id: "g:split",
         label: "Split right",
@@ -227,7 +237,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["split", "column", "pane", "side by side"],
         hotkey: ["⌘", "\\"],
-        disabled: paneCount >= MAX_PANES,
+        disabled: narrow || paneCount >= MAX_PANES,
         run: () => void splitActivePane(),
       },
       {
@@ -249,13 +259,35 @@ export function useGlobalActions(opts: {
         run: () => pinActiveTab(),
       },
       {
+        id: "g:tab-next",
+        label: "Next tab",
+        description: "Show the next tab in this column",
+        icon: ArrowRightToLineIcon,
+        scope: "global",
+        keywords: ["tab", "next", "cycle"],
+        hotkey: ["⌥", "]"],
+        disabled: !hasTabs,
+        run: () => cycleTab(1),
+      },
+      {
+        id: "g:tab-prev",
+        label: "Previous tab",
+        description: "Show the previous tab in this column",
+        icon: ArrowLeftToLineIcon,
+        scope: "global",
+        keywords: ["tab", "previous", "cycle"],
+        hotkey: ["⌥", "["],
+        disabled: !hasTabs,
+        run: () => cycleTab(-1),
+      },
+      {
         id: "g:pane-left",
         label: "Focus column on the left",
         description: "Move to the column on the left",
         icon: ArrowLeftToLineIcon,
         scope: "global",
         keywords: ["column", "pane", "left", "focus"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () => focusAdjacentPane(-1),
       },
       {
@@ -265,7 +297,7 @@ export function useGlobalActions(opts: {
         icon: ArrowRightToLineIcon,
         scope: "global",
         keywords: ["column", "pane", "right", "focus"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () => focusAdjacentPane(1),
       },
       {
@@ -277,7 +309,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["move", "column", "pane", "left", "send"],
         hotkey: ["⌃", "⌥", "←"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () =>
           void moveToAdjacentColumn(-1, getCommandCenterAmbientRowKey()),
       },
@@ -290,7 +322,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["move", "column", "pane", "right", "send"],
         hotkey: ["⌃", "⌥", "→"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () =>
           void moveToAdjacentColumn(1, getCommandCenterAmbientRowKey()),
       },
@@ -436,5 +468,7 @@ export function useGlobalActions(opts: {
     openConnect,
     daily,
     paneCount,
+    hasTabs,
+    narrow,
   ]);
 }

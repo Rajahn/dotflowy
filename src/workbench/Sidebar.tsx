@@ -33,7 +33,11 @@ import {
   ResponsiveMenuItem,
   ResponsiveMenuTrigger,
 } from "../components/ui/responsive-menu";
-import { getNodeActionBridge } from "../data/command-bridge";
+import {
+  getAnyNodeActionBridge,
+  getNodeActionBridge,
+  type NodeActionBridge,
+} from "../data/command-bridge";
 import { capture } from "../data/history";
 import {
   createFolder,
@@ -80,7 +84,15 @@ import { openInPane, toggleSidebar } from "./store";
  * on the top or bottom edge of a row to place before or after it. Dragging an
  * unfiled node into a folder files it as a note.
  */
-export function Sidebar({ width }: Readonly<{ width: number }>) {
+export function Sidebar({
+  width,
+  drawer = false,
+}: Readonly<{
+  width: number;
+  /** Rendered inside the narrow-screen drawer (MobileLibrary.tsx), which
+   *  owns the height and the close control. */
+  drawer?: boolean;
+}>) {
   const tree = useLibraryTree();
   const rows = useLibraryRows();
   const topLevel = useTopLevelIds();
@@ -113,8 +125,13 @@ export function Sidebar({ width }: Readonly<{ width: number }>) {
   return (
     <nav
       aria-label="Library"
-      className="workbench-sidebar flex h-dvh shrink-0 flex-col overflow-y-auto border-r bg-sidebar text-sm text-sidebar-foreground"
-      style={{ width }}
+      className={cn(
+        "workbench-sidebar flex flex-col text-sm",
+        drawer
+          ? "-mx-3"
+          : "h-dvh shrink-0 overflow-y-auto border-r bg-sidebar text-sidebar-foreground",
+      )}
+      style={drawer ? undefined : { width }}
     >
       <div className="flex items-center gap-1 px-3 pt-3 pb-1">
         <span className="flex-1 text-xs font-medium text-muted-foreground">
@@ -123,6 +140,7 @@ export function Sidebar({ width }: Readonly<{ width: number }>) {
         <SidebarIconButton
           icon={NoteAddIcon}
           label="New note"
+          opens
           onClick={() => {
             const nodeId = createNote(folderTarget);
             if (folderTarget) setCollapsed(folderTarget, false);
@@ -138,11 +156,13 @@ export function Sidebar({ width }: Readonly<{ width: number }>) {
           label="New folder"
           onClick={newFolder}
         />
-        <SidebarIconButton
-          icon={SidebarLeftIcon}
-          label="Hide sidebar"
-          onClick={() => toggleSidebar()}
-        />
+        {!drawer && (
+          <SidebarIconButton
+            icon={SidebarLeftIcon}
+            label="Hide sidebar"
+            onClick={() => toggleSidebar()}
+          />
+        )}
       </div>
 
       <ul className="px-2 pb-1">
@@ -281,6 +301,10 @@ function FolderItem(
       toast("Move or delete the notes in this folder first.");
       return;
     }
+    // Its hidden rows (notes whose node is gone or nested, kept so an undo
+    // brings them back) move up a level instead of pointing at nothing.
+    for (const row of rows)
+      if (row.parentId === id) moveLibraryRow(row.id, props.parentId, null);
     deleteLibraryRow(id);
     if (props.currentFolder === id) props.onSelectFolder(null);
   };
@@ -598,6 +622,7 @@ function SidebarRow({
           "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
       )}
       aria-current={active ? "page" : undefined}
+      data-sidebar-open=""
       onClick={(e) => onClick(e.metaKey || e.ctrlKey)}
       onDoubleClick={onDoubleClick}
     >
@@ -619,17 +644,21 @@ function SidebarIconButton({
   icon,
   label,
   onClick,
+  opens = false,
 }: {
   icon: IconSvgElement;
   label: string;
   onClick: () => void;
+  /** It opens a note (the phone drawer closes on it). */
+  opens?: boolean;
 }) {
   return (
     <button
       type="button"
-      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground pointer-coarse:size-10"
       aria-label={label}
       title={label}
+      data-sidebar-open={opens ? "" : undefined}
       onClick={onClick}
     >
       <HugeiconsIcon icon={icon} className="size-4" aria-hidden="true" />
@@ -645,7 +674,7 @@ function RowMenu({ label, children }: { label: string; children: ReactNode }) {
           <button
             type="button"
             aria-label={label}
-            className="absolute right-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 data-[popup-open]:opacity-100"
+            className="absolute right-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 data-[popup-open]:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100"
           >
             <HugeiconsIcon
               icon={MoreHorizontalIcon}
@@ -689,7 +718,9 @@ function RenameInput({
           e.preventDefault();
           commit();
         } else if (e.key === "Escape") {
+          // Cancels the rename only, not the drawer it may sit in.
           e.preventDefault();
+          e.stopPropagation();
           onDone(null);
         }
       }}
@@ -806,17 +837,36 @@ function createNote(folderId: string | null): string | null {
   return nodeId;
 }
 
+/** Run `act` through an editor's command funnel: the active column's, else
+ *  any column's. With no editor mounted at all (one empty column), open the
+ *  note there first and act once its editor is up. */
+function withEditor(nodeId: string, act: (bridge: NodeActionBridge) => void) {
+  const bridge = getNodeActionBridge() ?? getAnyNodeActionBridge();
+  if (bridge) {
+    act(bridge);
+    return;
+  }
+  openInPane(getActivePaneId(), nodeId, { preview: false });
+  let frames = 60;
+  const wait = () => {
+    const mounted = getNodeActionBridge();
+    if (mounted) act(mounted);
+    else if (frames-- > 0) requestAnimationFrame(wait);
+  };
+  requestAnimationFrame(wait);
+}
+
 /** Rename a note = edit its root node's text, through the editor's command
  *  funnel (lock guard, text history). */
 function renameNote(nodeId: string, text: string) {
-  getNodeActionBridge()?.commands.onTextChange(nodeId, text.trim());
+  withEditor(nodeId, (b) => b.commands.onTextChange(nodeId, text.trim()));
 }
 
 /** Delete a note = delete its root node's subtree, through the editor's delete
  *  funnel (protection and lock guards, the big-subtree confirm, undo). Tabs
  *  showing the note or anything inside it close (lifecycle.ts). */
 function deleteNote(nodeId: string) {
-  getNodeActionBridge()?.commands.onDeleteNode(nodeId);
+  withEditor(nodeId, (b) => b.commands.onDeleteNode(nodeId));
 }
 
 // --- collapsed folders (per device) ------------------------------------------

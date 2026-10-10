@@ -86,5 +86,10 @@ test.describe("/delete slash command", () => {
     // column is left empty, on the top-level URL, rather than on a missing node.
     await expect(page.getByText("Open a note from the sidebar.")).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
+    // Undo still works with no editor in the column, and brings the note back
+    // into it.
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(title(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/alpha$/);
   });
 });

@@ -967,10 +967,14 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
     if (!header || !hasResizeObserver()) return;
     const ro = new ResizeObserver(measure);
     ro.observe(header);
+    // And when the pane's own box changes: the phone tab strip above the
+    // editor comes and goes without remounting it.
+    const pane = paneElement(paneId);
+    if (pane) ro.observe(pane);
     return () => ro.disconnect();
     // `loading`: an editor mounted before the outline synced renders the
     // skeleton first; the list (and its margin) exists only once it ends.
-  }, [rootId, zoomedNode?.id, loading]);
+  }, [rootId, zoomedNode?.id, loading, paneId]);
   const useListVirtualizer = windowScroll
     ? useWindowListVirtualizer
     : usePaneListVirtualizer;

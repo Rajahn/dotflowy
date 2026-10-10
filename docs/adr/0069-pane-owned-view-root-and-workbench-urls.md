@@ -89,4 +89,10 @@ external-write rule, are unchanged.
   stacks are not saved. Restored tabs whose node is gone are dropped once the
   outline has synced, and a tab closes when the node it shows is deleted.
 - **Keyboard**: the workbench chords and how they were checked for conflicts
-  are listed in `docs/keyboard.md`; every one is also a Cmd+K action.
+  are listed in `docs/keyboard.md`; every one but focusing a column by number
+  (focus left/right covers it) is also a Cmd+K action.
+- **Narrow screens** (< 768px) show the active column only, on page scroll;
+  its tab strip appears with a second tab and scrolls sideways, and the
+  library opens as an ADR 0066 bottom drawer from the header. The other
+  columns stay in the layout and come back at 768px. There is no cross-column
+  drag there: "Move to…" lists the open tabs first.
