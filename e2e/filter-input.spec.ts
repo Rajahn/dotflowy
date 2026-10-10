@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openSeededOutline, seedOutline, type SeedNode } from "./fixtures";
+import {
+  openSeededOutline,
+  scrollOutlineTo,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 // The `?q=` filter input (ADR 0047 §6, amended 2026-07-11): CORE subheader
 // chrome opened by Cmd+F / the header magnifier / the Cmd+K "Filter this view"
@@ -247,7 +252,7 @@ test.describe("resident filter input (ADR 0047 §6)", () => {
     await expect(editor).toHaveText("Edited!");
     await expect(editor).toBeFocused();
 
-    await page.evaluate(() => window.scrollTo(0, 4000));
+    await scrollOutlineTo(page, 4000);
     await expect(row(page, "node-0")).toHaveCount(0);
     await expect
       .poll(() =>
@@ -258,7 +263,7 @@ test.describe("resident filter input (ADR 0047 §6)", () => {
           .then(Number),
       )
       .toBeGreaterThan(50);
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await scrollOutlineTo(page, 0);
     await expect(row(page, "node-1")).toBeVisible();
     await expect(row(page, "node-0")).toHaveCount(0);
     await expect(input(page)).toHaveValue("match");

@@ -3,6 +3,8 @@ import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import type { VisibleRow } from "../data/visible-order";
 
+import { contentY, scrollerOf } from "../data/pane-scroll";
+
 const CHECKED_MS = 80;
 const FADE_MS = 80;
 const MOVE_MS = 80;
@@ -234,9 +236,11 @@ export function useCompletionTransition({
       const old = properties[property];
       const computed = getComputedStyle(el);
       const currentY = new DOMMatrixReadOnly(computed.transform).m42;
+      // In the scroller's content frame (pane root or window), so a scroll
+      // between two passes never reads as a layout shift.
       const base = opacity
         ? 0
-        : el.getBoundingClientRect().y + window.scrollY - currentY;
+        : contentY(scrollerOf(el), el.getBoundingClientRect().y) - currentY;
       if (
         old?.target === target &&
         old.deadline === deadline &&

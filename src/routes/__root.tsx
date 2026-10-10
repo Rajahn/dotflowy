@@ -217,7 +217,9 @@ function AuthGate({ children }: Readonly<{ children: ReactNode }>) {
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" className="[scrollbar-gutter:stable]">
+    // Only a narrow screen scrolls the page; a wide one scrolls each workbench
+    // pane, which reserves its own gutter (docs/workbench/PLAN.md 2.3).
+    <html lang="en" className="max-md:[scrollbar-gutter:stable]">
       <head>
         {/* SVG tab icon — theme-swapped in place by noFlashThemeScript. */}
         <link

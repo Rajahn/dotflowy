@@ -25,7 +25,8 @@
  *     scrolls: edge rows clamp, and the breathing-room padding (also ADR
  *     0060) lives in OutlineEditor.
  *  4. The breathing-room grow/collapse on toggle (ADR 0060): ONE tween drives
- *     the region's inline padding AND the window scroll in the same frames,
+ *     the region's inline padding AND its scroller (the pane root on a wide
+ *     screen, the window on a narrow one -- pane-scroll.ts) in the same frames,
  *     so the anchored row stays glued to the screen. Two separate animations
  *     (a CSS padding transition plus a scroll tween) always fight -- that was
  *     the bounce. The `pt-[50vh]` class is the steady state the tween hands
@@ -33,6 +34,13 @@
  */
 
 import { SPOTLIGHT_KEY } from "../lib/storage-keys";
+import {
+  getScrollTop,
+  scrollViewport,
+  scrollerOf,
+  setScrollTop,
+} from "./pane-scroll";
+import { getActivePaneId, paneElement } from "./panes";
 
 // -- toggle store -----------------------------------------------------------
 
@@ -136,11 +144,16 @@ function runTween(
   tweenRaf = requestAnimationFrame(frame);
 }
 
-/** Interruptible ease-out scroll. */
-function slideBy(delta: number, ms: number): void {
+/** Interruptible ease-out scroll of `scroller` (a pane root, or null for the
+ *  window -- pane-scroll.ts). */
+function slideBy(
+  scroller: HTMLElement | null,
+  delta: number,
+  ms: number,
+): void {
   if (Math.abs(delta) < 1) return;
-  const from = window.scrollY;
-  runTween(ms, (t) => window.scrollTo(0, from + delta * t));
+  const from = getScrollTop(scroller);
+  runTween(ms, (t) => setScrollTop(scroller, from + delta * t));
 }
 
 /**
@@ -151,11 +164,12 @@ function slideBy(delta: number, ms: number): void {
  */
 let breathAnimating = false;
 
-/** The outline region (ADR 0060 breathing room lives on it as `pt-[50vh]`). */
+/** The active pane's outline region (ADR 0060 breathing room lives on it as
+ *  `pt-[50vh]`). Other panes take the steady-state class without the tween. */
 function outlineRegion(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(
-    '[role="region"][aria-label="Outline"]',
-  );
+  return (
+    paneElement(getActivePaneId()) ?? document
+  ).querySelector<HTMLElement>('[role="region"][aria-label="Outline"]');
 }
 
 /** Half the viewport, matching the region's `pt-[50vh]` class. */
@@ -179,7 +193,8 @@ function animateBreath(
   scrollDelta: number,
 ): void {
   const region = outlineRegion();
-  const from = window.scrollY;
+  const scroller = scrollerOf(region);
+  const from = getScrollTop(scroller);
   breathAnimating = true;
   if (region) {
     // The tween owns the scroll for its whole flight; the browser's scroll
@@ -192,7 +207,7 @@ function animateBreath(
     (t) => {
       if (region)
         region.style.paddingTop = `${Math.round(padFrom + (padTo - padFrom) * t)}px`;
-      window.scrollTo(0, from + scrollDelta * t);
+      setScrollTop(scroller, from + scrollDelta * t);
     },
     () => {
       breathAnimating = false;
@@ -226,9 +241,12 @@ function isMobileViewport(): boolean {
   return window.matchMedia("(max-width: 767px)").matches;
 }
 
-/** `headerRef` is the sticky wrapper around `<header>` (plus subheader chrome). */
-function stickyHeaderHeight(): number {
-  const header = document.querySelector("header");
+/** `headerRef` is the sticky wrapper around `<header>` (plus subheader chrome)
+ *  of the pane `el` renders in. */
+function stickyHeaderHeight(within: Element): number {
+  const header = (within.closest("[data-pane-id]") ?? document).querySelector(
+    "header",
+  );
   if (!(header instanceof HTMLElement)) return 0;
   const sticky = header.parentElement;
   const el =
@@ -238,15 +256,20 @@ function stickyHeaderHeight(): number {
   return el.getBoundingClientRect().height;
 }
 
-function alignScrollDelta(rowTop: number, rowHeight: number): number {
-  const viewTop = window.visualViewport?.offsetTop ?? 0;
-  const viewHeight = window.visualViewport?.height ?? window.innerHeight;
+/** Distance `el`'s scroller (pane root or window) must travel so a row at
+ *  `rowTop`/`rowHeight` lands on the spotlight align. */
+function alignScrollDelta(
+  el: Element,
+  rowTop: number,
+  rowHeight: number,
+): number {
+  const view = scrollViewport(scrollerOf(el));
   return centerScrollDelta(
     rowTop,
     rowHeight,
-    viewTop,
-    viewHeight,
-    stickyHeaderHeight(),
+    view.top,
+    view.height,
+    stickyHeaderHeight(el),
     isMobileViewport(),
   );
 }
@@ -295,7 +318,7 @@ export function centerElement(el: HTMLElement, ms: number): void {
   if (!installed || breathAnimating || !el.isConnected) return;
   const rect = el.getBoundingClientRect();
   if (rect.height === 0) return;
-  slideBy(alignScrollDelta(rect.top, rect.height), ms);
+  slideBy(scrollerOf(el), alignScrollDelta(el, rect.top, rect.height), ms);
 }
 
 /** Center a target after a navigation (e.g. zooming into a childless node).
@@ -365,7 +388,11 @@ export function installSpotlight(animate = true): void {
       const rect = row.getBoundingClientRect();
       // Where the row lands once the pad has grown above it -- from where the
       // flight actually starts, not from zero. Same align fork as focusin.
-      delta = alignScrollDelta(rect.top + (breathPad() - padFrom), rect.height);
+      delta = alignScrollDelta(
+        row,
+        rect.top + (breathPad() - padFrom),
+        rect.height,
+      );
     }
     animateBreath(padFrom, breathPad(), delta);
   };
@@ -424,5 +451,9 @@ export function uninstallSpotlight(): void {
     // collapsed frame before the tween's first write.
     region.style.paddingTop = `${flight}px`;
   }
-  animateBreath(flight, base, held ? -(flight - base) : -window.scrollY);
+  animateBreath(
+    flight,
+    base,
+    held ? -(flight - base) : -getScrollTop(scrollerOf(region)),
+  );
 }

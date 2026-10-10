@@ -11,6 +11,7 @@ import {
 } from "../src/data/date-links";
 import {
   openSeededOutline,
+  scrollOutlineTo,
   seedOutline,
   STANDARD_TREE,
   type SeedNode,
@@ -406,8 +407,7 @@ test.describe("week calendar strip (ADR 0054)", () => {
 
     await clientNavigate(page, "/the-day");
     await expect(strip(page)).toBeVisible();
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+    expect(await scrollOutlineTo(page, "bottom")).toBeGreaterThan(200);
 
     const midpointPromise = pauseSelectionAtMidpoint(page, OTHER);
     await pill(page, OTHER).click();

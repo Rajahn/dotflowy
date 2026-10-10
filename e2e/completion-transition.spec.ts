@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { scrollOutlineTo, seedOutline, type SeedNode } from "./fixtures";
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -571,7 +571,9 @@ test("late-mounted exiting rows join the fade and cannot take focus", async ({
           observer.observe(document.querySelector(".outline-list")!, {
             childList: true,
           });
-          window.scrollTo(0, 3500);
+          (
+            document.querySelector<HTMLElement>("[data-pane-scroll]") ?? window
+          ).scrollTo(0, 3500);
         },
       ),
   );
@@ -594,7 +596,7 @@ test("late-mounted exiting rows join the fade and cannot take focus", async ({
     if (el instanceof HTMLElement) el.focus();
   });
   await expect(late.locator(".node-text")).not.toBeFocused();
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await scrollOutlineTo(page, 0);
   await page.clock.runFor(32);
   expect(
     await row(page, "task").evaluate(

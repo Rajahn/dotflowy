@@ -29,6 +29,23 @@ export async function openSeededOutline(
   await ready.waitFor({ state: "visible" });
 }
 
+/** Scroll the outline: the first workbench pane root on a wide screen (each
+ *  pane scrolls on its own), the window on a narrow one. `"bottom"` scrolls to
+ *  the end. Resolves to the new scroll offset. */
+export async function scrollOutlineTo(
+  page: Page,
+  top: number | "bottom",
+): Promise<number> {
+  return page.evaluate((to) => {
+    const scroller =
+      document.querySelector<HTMLElement>("[data-pane-scroll]") ??
+      document.scrollingElement;
+    if (!scroller) return 0;
+    scroller.scrollTo(0, to === "bottom" ? scroller.scrollHeight : to);
+    return scroller.scrollTop;
+  }, top);
+}
+
 // A node as the test author cares about it -- structural fields only. Everything
 // the schema also requires (isTask/completed/collapsed/timestamps) is filled in
 // with inert defaults by seedOutline so each test only states what matters.

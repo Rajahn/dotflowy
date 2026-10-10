@@ -5,7 +5,11 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import {
+  useVirtualizer,
+  useWindowVirtualizer,
+  type VirtualizerOptions,
+} from "@tanstack/react-virtual";
 import { Cause, Effect, Fiber } from "effect";
 import {
   ChevronRight,
@@ -65,6 +69,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
+import { contentY, scrollerOf } from "../data/pane-scroll";
 import { paneElement, useIsActivePane } from "../data/panes";
 import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
@@ -126,7 +131,7 @@ import {
   useViewFilter,
 } from "../plugins/registry";
 import { registerPaneActions } from "../workbench/pane-actions";
-import { usePaneId } from "../workbench/pane-context";
+import { usePaneId, usePaneWindowScroll } from "../workbench/pane-context";
 import { Backlinks } from "./backlinks";
 import { TitleParagraphGlyph } from "./bullet-glyph";
 import {
@@ -327,8 +332,8 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   } = useOutlineFocus();
 
   // The windowed list container, so the drag
-  // indicator knows how wide to draw and the window virtualizer can measure its
-  // document-top offset (scrollMargin).
+  // indicator knows how wide to draw and the virtualizer can measure its
+  // offset from the top of the scroll content (scrollMargin).
   const listRef = useRef<HTMLElement | null>(null);
   // The sticky header block above the list. Observed so scrollMargin re-measures
   // when its height changes (tag-filter subheader opening, breadcrumb wrap, the
@@ -822,15 +827,24 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFocus,
     pendingFocusAtStart,
   ]);
-  // scrollMargin = the list container's distance from the document top (header +
-  // title above it). Measured per zoom view; the editor remounts on zoom (route
-  // key), so a one-shot mount measure is current. listRef is set in the branch
-  // below, so this runs after the list paints once.
+  // Who scrolls this outline: the pane root on a wide screen, the window on a
+  // narrow one (pane-scroll.ts). Fixed per mount -- the workbench keys the
+  // editor by it -- so the virtualizer hook choice below is stable.
+  const windowScroll = usePaneWindowScroll();
+  // scrollMargin = the list container's distance from the top of the scroll
+  // content (header + title above it): the document top when the window
+  // scrolls, the pane root's content top otherwise. Measured per zoom view;
+  // the editor remounts on zoom (route key), so a one-shot mount measure is
+  // current. listRef is set in the branch below, so this runs after the list
+  // paints once.
   const [scrollMargin, setScrollMargin] = useState(0);
   useLayoutEffect(() => {
     const measure = () => {
       const el = listRef.current;
-      if (el) setScrollMargin(el.getBoundingClientRect().top + window.scrollY);
+      if (el)
+        setScrollMargin(
+          contentY(scrollerOf(el), el.getBoundingClientRect().top),
+        );
     };
     measure();
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
@@ -841,7 +855,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     ro.observe(header);
     return () => ro.disconnect();
   }, [rootId, zoomedNode?.id]);
-  const virtualizer = useWindowVirtualizer<HTMLLIElement>({
+  const useListVirtualizer = windowScroll
+    ? useWindowListVirtualizer
+    : usePaneListVirtualizer;
+  const virtualizer = useListVirtualizer({
+    getScrollElement: () => scrollerOf(listRef.current),
     count: renderedRows.length,
     estimateSize: () => ROW_ESTIMATE,
     overscan: 8,
@@ -853,9 +871,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     // cache is unaffected.
     getItemKey: (i) => renderedRows[i]?.key ?? i,
     // Seed the viewport size so the FIRST paint already has a non-empty window.
-    // Without it the window virtualizer starts at a 0-height rect and renders no
-    // rows until it observes the window a frame later -- a gap that, under heavy
+    // Without it the virtualizer starts at a 0-height rect and renders no rows
+    // until it observes its scroller a frame later -- a gap that, under heavy
     // load, can outlast a "row is visible" assertion (and shows a blank flash).
+    // A pane root is viewport-tall, so the window size is the right seed for
+    // both modes.
     initialRect: hasWindow()
       ? { width: window.innerWidth, height: window.innerHeight }
       : undefined,
@@ -907,6 +927,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
         indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
         measurementAt: (i) => virtualizer.measurementsCache[i],
+        viewportTop: (start) => {
+          const scroller = scrollerOf(listRef.current);
+          return scroller
+            ? start - scroller.scrollTop + scroller.getBoundingClientRect().top
+            : start - window.scrollY;
+        },
       }),
     [paneId, virtualizer],
   );
@@ -1131,6 +1157,42 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       </div>
     </>
   );
+}
+
+type ListVirtualizerOptions = Pick<
+  VirtualizerOptions<HTMLElement, HTMLLIElement>,
+  | "getScrollElement"
+  | "count"
+  | "estimateSize"
+  | "overscan"
+  | "scrollMargin"
+  | "getItemKey"
+  | "initialRect"
+>;
+
+/**
+ * The two ways the outline list can be windowed (ADR 0019, revised by
+ * docs/workbench/PLAN.md 2.3): over its pane root (wide screens, each column
+ * scrolls on its own) or over the window (narrow screens keep page scrolling).
+ * Both wrap the same `useVirtualizerBase`, so they run an identical hook
+ * sequence; the editor picks one per mount and is remounted when the mode
+ * flips, so the choice never changes under a live instance.
+ */
+function usePaneListVirtualizer(options: ListVirtualizerOptions) {
+  // React Compiler off, as for the editor itself: the virtualizer is a stable
+  // instance over mutable state (ADR 0019), which is exactly what this lint
+  // warns about -- and why the compiler is opted out here.
+  "use no memo";
+  // oxlint-disable-next-line react/incompatible-library
+  return useVirtualizer<HTMLElement, HTMLLIElement>(options);
+}
+
+function useWindowListVirtualizer({
+  getScrollElement: _element,
+  ...options
+}: ListVirtualizerOptions) {
+  "use no memo";
+  return useWindowVirtualizer<HTMLLIElement>(options);
 }
 
 /**
