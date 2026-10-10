@@ -41,6 +41,14 @@ export function setHistoryLocationReader(reader: typeof readLocation): void {
   readLocation = reader;
 }
 
+/** Told about every authoring capture (even a coalesced keystroke), with the
+ *  location the caller supplied, if any. The workbench pins a preview tab on
+ *  its first write (docs/workbench/PLAN.md 1.3). */
+let captureListener: ((location: HistoryLocation | null) => void) | null = null;
+export function setCaptureListener(listener: typeof captureListener): void {
+  captureListener = listener;
+}
+
 /**
  * Undo/redo history for the outline.
  *
@@ -231,6 +239,7 @@ export function capture(
     return;
   }
   lastCaptureRefused = false;
+  captureListener?.(options.location ?? null);
 
   const top = undoStack[undoStack.length - 1];
   if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;

@@ -8,6 +8,7 @@ import {
   MoreHorizontalIcon,
   Note01Icon,
   NoteAddIcon,
+  SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Option, Schema } from "effect";
@@ -51,7 +52,6 @@ import {
   type LibraryItem,
   type LibraryRow,
 } from "../data/library-core";
-import { getLiveNodes } from "../data/live-nodes";
 import { insertSibling } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
 import { getActivePaneId } from "../data/panes";
@@ -60,8 +60,14 @@ import { runStructuralTracked } from "../data/structural";
 import { childrenOf, type TreeIndex } from "../data/tree";
 import { getTreeIndex, useNode } from "../data/tree-store";
 import { usePluginChrome } from "../plugins/registry";
+import {
+  hasLibraryDrag,
+  readLibraryDrag,
+  startLibraryDrag,
+  type LibraryDrag,
+} from "./dnd";
 import { useActivePaneRootId } from "./hooks";
-import { getActivePaneTab, zoomPane } from "./store";
+import { openInPane, toggleSidebar } from "./store";
 
 /**
  * The workbench sidebar (docs/workbench/PLAN.md 1.2): the library's folders
@@ -74,7 +80,7 @@ import { getActivePaneTab, zoomPane } from "./store";
  * on the top or bottom edge of a row to place before or after it. Dragging an
  * unfiled node into a folder files it as a note.
  */
-export function Sidebar() {
+export function Sidebar({ width }: Readonly<{ width: number }>) {
   const tree = useLibraryTree();
   const rows = useLibraryRows();
   const topLevel = useTopLevelIds();
@@ -93,7 +99,10 @@ export function Sidebar() {
       ? currentFolder
       : null;
 
-  const open = (nodeId: string | null) => zoomPane(getActivePaneId(), nodeId);
+  // A click previews a note in the active pane (replacing its preview tab);
+  // a double-click or Cmd/Ctrl+click opens it as a pinned tab (PLAN 1.3).
+  const open = (nodeId: string | null, pinned: boolean) =>
+    openInPane(getActivePaneId(), nodeId, { preview: !pinned });
 
   const newFolder = () => {
     const id = createFolder(folderTarget, "New folder");
@@ -104,7 +113,8 @@ export function Sidebar() {
   return (
     <nav
       aria-label="Library"
-      className="workbench-sidebar flex h-dvh w-60 shrink-0 flex-col overflow-y-auto border-r bg-sidebar text-sm text-sidebar-foreground"
+      className="workbench-sidebar flex h-dvh shrink-0 flex-col overflow-y-auto border-r bg-sidebar text-sm text-sidebar-foreground"
+      style={{ width }}
     >
       <div className="flex items-center gap-1 px-3 pt-3 pb-1">
         <span className="flex-1 text-xs font-medium text-muted-foreground">
@@ -117,13 +127,21 @@ export function Sidebar() {
             const nodeId = createNote(folderTarget);
             if (folderTarget) setCollapsed(folderTarget, false);
             if (nodeId)
-              zoomPane(getActivePaneId(), nodeId, { selectTitle: true });
+              openInPane(getActivePaneId(), nodeId, {
+                preview: false,
+                selectTitle: true,
+              });
           }}
         />
         <SidebarIconButton
           icon={FolderAddIcon}
           label="New folder"
           onClick={newFolder}
+        />
+        <SidebarIconButton
+          icon={SidebarLeftIcon}
+          label="Hide sidebar"
+          onClick={() => toggleSidebar()}
         />
       </div>
 
@@ -132,10 +150,10 @@ export function Sidebar() {
           <SidebarRow
             icon={Home01Icon}
             active={activeRoot === null}
-            onClick={() => {
+            onClick={(pinned) => {
               // Back to the top: new notes and folders land at the root too.
               setCurrentFolder(null);
-              open(null);
+              open(null, pinned);
             }}
           >
             Whole outline
@@ -146,7 +164,7 @@ export function Sidebar() {
             <SidebarRow
               iconComponent={entry.icon}
               active={activeRoot !== null && activeRoot === entryIds[i]}
-              onClick={() => entry.open((id) => open(id))}
+              onClick={(pinned) => entry.open((id) => open(id, pinned))}
             >
               {entry.label}
             </SidebarRow>
@@ -212,7 +230,7 @@ interface LevelProps {
   renaming: string | null;
   setRenaming: (id: string | null) => void;
   onSelectFolder: (id: string | null) => void;
-  onOpen: (nodeId: string) => void;
+  onOpen: (nodeId: string, pinned: boolean) => void;
 }
 
 function LibraryLevel(props: LevelProps) {
@@ -349,7 +367,10 @@ function FolderItem(
               const nodeId = createNote(id);
               setCollapsed(id, false);
               if (nodeId)
-                zoomPane(getActivePaneId(), nodeId, { selectTitle: true });
+                openInPane(getActivePaneId(), nodeId, {
+                  preview: false,
+                  selectTitle: true,
+                });
             }}
           >
             New note here
@@ -401,7 +422,7 @@ function NoteItem({
   rows: readonly LibraryRow[];
   nextId: string | null;
   active: boolean;
-  onOpen: (nodeId: string) => void;
+  onOpen: (nodeId: string, pinned: boolean) => void;
 }) {
   const title = useNoteTitle(nodeId);
   // Rename edits the source text: the title is its flattened reading, and
@@ -452,8 +473,8 @@ function NoteItem({
           <SidebarRow
             icon={Note01Icon}
             active={active}
-            onClick={() => onOpen(nodeId)}
-            onDoubleClick={() => setRenaming(true)}
+            onClick={(pinned) => onOpen(nodeId, pinned)}
+            onDoubleClick={() => onOpen(nodeId, true)}
           >
             {title}
           </SidebarRow>
@@ -482,7 +503,7 @@ function UnfiledSection({
   activeRoot: string | null;
   open: boolean;
   onToggle: () => void;
-  onOpen: (nodeId: string) => void;
+  onOpen: (nodeId: string, pinned: boolean) => void;
 }) {
   return (
     <div className="border-t px-2 py-2">
@@ -528,7 +549,7 @@ function UnfiledItem({
 }: {
   nodeId: string;
   active: boolean;
-  onOpen: (nodeId: string) => void;
+  onOpen: (nodeId: string, pinned: boolean) => void;
 }) {
   const title = useNoteTitle(nodeId);
   return (
@@ -541,7 +562,8 @@ function UnfiledItem({
       <SidebarRow
         icon={Note01Icon}
         active={active}
-        onClick={() => onOpen(nodeId)}
+        onClick={(pinned) => onOpen(nodeId, pinned)}
+        onDoubleClick={() => onOpen(nodeId, true)}
       >
         {title}
       </SidebarRow>
@@ -562,7 +584,8 @@ function SidebarRow({
   icon?: IconSvgElement;
   iconComponent?: React.ComponentType<{ className?: string }>;
   active: boolean;
-  onClick: () => void;
+  /** `pinned` is true for a Cmd/Ctrl+click. */
+  onClick: (pinned: boolean) => void;
   onDoubleClick?: () => void;
   children: ReactNode;
 }) {
@@ -575,7 +598,7 @@ function SidebarRow({
           "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
       )}
       aria-current={active ? "page" : undefined}
-      onClick={onClick}
+      onClick={(e) => onClick(e.metaKey || e.ctrlKey)}
       onDoubleClick={onDoubleClick}
     >
       {icon ? (
@@ -723,33 +746,7 @@ function noteTitle(index: TreeIndex, text: string): string {
 
 // --- library drag and drop --------------------------------------------------
 
-const DRAG_TYPE = "application/x-dotflowy-library";
-
-const LibraryDragSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("row"), id: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("node"), nodeId: Schema.String }),
-]);
-type LibraryDrag = Schema.Schema.Type<typeof LibraryDragSchema>;
-// The drag payload crosses a browser boundary (another tab can drop anything).
-const decodeLibraryDrag = Schema.decodeUnknownOption(
-  Schema.fromJsonString(LibraryDragSchema),
-);
-
 type DropZone = "before" | "after" | "into";
-
-function startLibraryDrag(e: DragEvent, drag: LibraryDrag) {
-  e.stopPropagation();
-  e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(drag));
-}
-
-function hasLibraryDrag(e: DragEvent): boolean {
-  return e.dataTransfer.types.includes(DRAG_TYPE);
-}
-
-function readLibraryDrag(e: DragEvent): LibraryDrag | null {
-  return Option.getOrNull(decodeLibraryDrag(e.dataTransfer.getData(DRAG_TYPE)));
-}
 
 /** Where over a row the pointer is: its top or bottom edge places before or
  *  after; the middle of a folder drops into it. */
@@ -816,29 +813,10 @@ function renameNote(nodeId: string, text: string) {
 }
 
 /** Delete a note = delete its root node's subtree, through the editor's delete
- *  funnel (protection and lock guards, the big-subtree confirm, undo). Once
- *  it is gone, a tab showing it steps back to the whole outline; a refused or
- *  cancelled delete leaves the view where it was. */
+ *  funnel (protection and lock guards, the big-subtree confirm, undo). Tabs
+ *  showing the note or anything inside it close (lifecycle.ts). */
 function deleteNote(nodeId: string) {
-  const bridge = getNodeActionBridge();
-  if (!bridge) return;
-  const tab = getActivePaneTab();
-  const shown =
-    tab && tab.rootId !== null && isWithin(getTreeIndex(), tab.rootId, nodeId);
-  bridge.commands.onDeleteNode(nodeId);
-  // Read the collection itself: the tree index may not have caught up yet.
-  if (shown && !getLiveNodes().some((n) => n.id === nodeId))
-    zoomPane(getActivePaneId(), null);
-}
-
-function isWithin(index: TreeIndex, id: string, ancestorId: string): boolean {
-  let cursor: string | null = id;
-  let guard = index.byId.size + 1;
-  while (cursor !== null && guard-- > 0) {
-    if (cursor === ancestorId) return true;
-    cursor = index.byId.get(cursor)?.parentId ?? null;
-  }
-  return false;
+  getNodeActionBridge()?.commands.onDeleteNode(nodeId);
 }
 
 // --- collapsed folders (per device) ------------------------------------------

@@ -70,3 +70,23 @@ external-write rule, are unchanged.
   of route params.
 - Tabs opened by deep links accumulate in the layout; the tab bar that lets a
   person see and close them arrives with the multi-column layout.
+
+## Layout and tabs (added with the multi-column layout)
+
+- **One to four columns**, each holding tabs; a column with one tab and no
+  sibling column shows no tab strip, so the single-column default looks like
+  the editor it replaced. A split copies the active view into a new column on
+  the right; a column closes with its last tab, except the last column, which
+  shows an empty state with recently opened notes.
+- **Preview tabs** follow VS Code: a sidebar click opens a preview (italic)
+  that the next preview in the same column replaces; a double-click on the note
+  or the tab, a Cmd/Ctrl+click, a drop, or any write into it pins it. Zooming
+  inside a preview does not pin it. A root already open in a column is focused
+  rather than opened twice; different columns may show the same node.
+- **Layout persistence** is per device and per account
+  (`dotflowy:workbench-layout:v1:<userId>` in localStorage): columns, widths,
+  tabs (root, filter, preview), the active column, and the sidebar. History
+  stacks are not saved. Restored tabs whose node is gone are dropped once the
+  outline has synced, and a tab closes when the node it shows is deleted.
+- **Keyboard**: the workbench chords and how they were checked for conflicts
+  are listed in `docs/keyboard.md`; every one is also a Cmd+K action.

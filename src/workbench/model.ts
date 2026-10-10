@@ -28,8 +28,14 @@ export interface WorkbenchTab extends TabView {
 export interface WorkbenchPane {
   id: string;
   tabs: WorkbenchTab[];
-  activeTabId: string;
+  /** Null only while the pane has no tabs (the last pane's empty state). */
+  activeTabId: string | null;
+  /** Relative width (a flex-grow ratio); panes start equal at 1. */
+  width: number;
 }
+
+/** At most four columns (PLAN 1.3). */
+export const MAX_PANES = 4;
 
 export interface WorkbenchState {
   panes: WorkbenchPane[];
@@ -54,6 +60,7 @@ export function defaultLayout(paneId: string, tabId: string): WorkbenchState {
         id: paneId,
         tabs: [makeTab(tabId, { rootId: null, q: "" })],
         activeTabId: tabId,
+        width: 1,
       },
     ],
   };
@@ -66,9 +73,9 @@ export function findPane(
   return state.panes.find((p) => p.id === paneId);
 }
 
-export function activeTabOf(pane: WorkbenchPane): WorkbenchTab {
-  // A pane always has its active tab; fall back to the first defensively.
-  return pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]!;
+/** The pane's active tab, or undefined while it has none (empty state). */
+export function activeTabOf(pane: WorkbenchPane): WorkbenchTab | undefined {
+  return pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0];
 }
 
 /** The active tab of `paneId`, or undefined when the pane is gone. */
@@ -78,6 +85,22 @@ export function activeTab(
 ): WorkbenchTab | undefined {
   const pane = findPane(state, paneId);
   return pane ? activeTabOf(pane) : undefined;
+}
+
+/**
+ * Whether the layout is still the untouched default: one pane, one tab, at the
+ * top, with no history. A page that opens on a deep link shows it in that tab
+ * instead of opening a second one beside an empty "Whole outline".
+ */
+export function isPristine(state: WorkbenchState): boolean {
+  const only = state.panes.length === 1 ? state.panes[0] : undefined;
+  const tab = only?.tabs.length === 1 ? only.tabs[0] : undefined;
+  return (
+    tab !== undefined &&
+    tab.rootId === null &&
+    tab.back.length === 0 &&
+    tab.forward.length === 0
+  );
 }
 
 function sameView(a: TabView, b: TabView): boolean {
@@ -185,9 +208,10 @@ export function findTabShowing(
     ...state.panes.filter((p) => p.id !== activePaneId),
   ];
   for (const pane of ordered) {
+    const active = activeTabOf(pane);
     const tabs = [
-      activeTabOf(pane),
-      ...pane.tabs.filter((t) => t.id !== pane.activeTabId),
+      ...(active ? [active] : []),
+      ...pane.tabs.filter((t) => t !== active),
     ];
     const tab = tabs.find((t) => t.rootId === rootId);
     if (tab) return { paneId: pane.id, tabId: tab.id };
@@ -232,6 +256,8 @@ export function resolveUrlChange(
   const pane = findPane(state, activePaneId) ?? state.panes[0];
   if (!pane) return undefined;
   const tab = activeTabOf(pane);
+  // An empty pane has nothing to step or zoom: the URL opens a tab there.
+  if (!tab) return { kind: "open", paneId: pane.id };
   if (change === "push" || change === "replace") {
     return {
       kind: change === "push" ? "zoom" : "replace",
@@ -257,9 +283,12 @@ export function resolveUrlChange(
     // 3. Otherwise the active tab zooms there.
     return { kind: "zoom", paneId: pane.id, tabId: tab.id };
   }
-  // A deep link: an existing tab wins, else a new pinned tab.
+  // A deep link: an existing tab wins, else a new pinned tab -- except into
+  // the untouched default layout, whose lone tab simply shows it.
   const open = findTabShowing(state, pane.id, target.rootId);
   if (open) return { kind: "focus", ...open };
+  if (isPristine(state))
+    return { kind: "replace", paneId: pane.id, tabId: tab.id };
   return { kind: "open", paneId: pane.id };
 }
 
@@ -326,6 +355,166 @@ export function focusTab(
     panes: state.panes.map((p) =>
       p.id === paneId ? { ...p, activeTabId: tabId } : p,
     ),
+  };
+}
+
+// --- Tabs and panes (PLAN 1.3) ---------------------------------------------
+
+/**
+ * Open `view` in `paneId`. A tab there already showing the root is focused
+ * (and pinned when `preview` is false). Otherwise a preview open replaces the
+ * pane's existing preview tab, or adds one; a pinned open adds a tab after the
+ * active one. Returns the tab now active.
+ */
+export function openTab(
+  state: WorkbenchState,
+  paneId: string,
+  view: TabView,
+  opts: { preview: boolean },
+  makeId: MakeId,
+): { state: WorkbenchState; tabId: string } | undefined {
+  const pane = findPane(state, paneId);
+  if (!pane) return undefined;
+  const existing = pane.tabs.find((t) => t.rootId === view.rootId);
+  if (existing) {
+    let next = focusTab(state, paneId, existing.id);
+    if (!opts.preview && existing.preview)
+      next = updateTab(next, existing.id, (t) => ({ ...t, preview: false }));
+    return { state: next, tabId: existing.id };
+  }
+  const preview = opts.preview ? pane.tabs.find((t) => t.preview) : undefined;
+  const tab = makeTab(makeId(), view, opts.preview);
+  let tabs: WorkbenchTab[];
+  if (preview) {
+    tabs = pane.tabs.map((t) => (t.id === preview.id ? tab : t));
+  } else {
+    const at = pane.tabs.findIndex((t) => t.id === pane.activeTabId);
+    tabs = [...pane.tabs];
+    tabs.splice(at < 0 ? tabs.length : at + 1, 0, tab);
+  }
+  return {
+    state: {
+      panes: state.panes.map((p) =>
+        p.id === paneId ? { ...p, tabs, activeTabId: tab.id } : p,
+      ),
+    },
+    tabId: tab.id,
+  };
+}
+
+/** Turn a preview tab into a pinned one. */
+export function pinTab(state: WorkbenchState, tabId: string): WorkbenchState {
+  return updateTab(state, tabId, (t) =>
+    t.preview ? { ...t, preview: false } : t,
+  );
+}
+
+/** Remove a tab from its pane, picking the neighbour (right, else left) as the
+ *  new active tab. A pane left empty closes -- unless it is the last one,
+ *  which stays as the empty state. */
+export function closeTab(state: WorkbenchState, tabId: string): WorkbenchState {
+  const pane = state.panes.find((p) => p.tabs.some((t) => t.id === tabId));
+  if (!pane) return state;
+  const i = pane.tabs.findIndex((t) => t.id === tabId);
+  const tabs = pane.tabs.filter((t) => t.id !== tabId);
+  if (tabs.length === 0 && state.panes.length > 1)
+    return { panes: state.panes.filter((p) => p.id !== pane.id) };
+  const activeTabId =
+    pane.activeTabId === tabId
+      ? ((tabs[i] ?? tabs[i - 1])?.id ?? null)
+      : pane.activeTabId;
+  return {
+    panes: state.panes.map((p) =>
+      p.id === pane.id ? { ...p, tabs, activeTabId } : p,
+    ),
+  };
+}
+
+/** A new pane to the right of `paneId`, showing a pinned copy of its active
+ *  tab's view. Undefined at {@link MAX_PANES} or for an empty pane. */
+export function splitPane(
+  state: WorkbenchState,
+  paneId: string,
+  makeTabId: MakeId,
+  makePaneId: MakeId,
+): { state: WorkbenchState; paneId: string; tabId: string } | undefined {
+  if (state.panes.length >= MAX_PANES) return undefined;
+  const i = state.panes.findIndex((p) => p.id === paneId);
+  const source = state.panes[i];
+  const tab = source ? activeTabOf(source) : undefined;
+  if (!source || !tab) return undefined;
+  const copy = makeTab(makeTabId(), { rootId: tab.rootId, q: tab.q });
+  const pane: WorkbenchPane = {
+    id: makePaneId(),
+    tabs: [copy],
+    activeTabId: copy.id,
+    width: source.width,
+  };
+  const panes = [...state.panes];
+  panes.splice(i + 1, 0, pane);
+  return { state: { panes }, paneId: pane.id, tabId: copy.id };
+}
+
+/**
+ * Move a tab to `toPaneId`, before `beforeTabId` (null = last), and make it
+ * active there. Reorders within a pane too. A source pane left empty closes.
+ */
+export function moveTab(
+  state: WorkbenchState,
+  tabId: string,
+  toPaneId: string,
+  beforeTabId: string | null,
+): WorkbenchState {
+  const from = state.panes.find((p) => p.tabs.some((t) => t.id === tabId));
+  const to = findPane(state, toPaneId);
+  const tab = from?.tabs.find((t) => t.id === tabId);
+  if (!from || !to || !tab || tabId === beforeTabId) return state;
+  let panes = state.panes.map((p) => {
+    if (p.id !== from.id) return p;
+    const tabs = p.tabs.filter((t) => t.id !== tabId);
+    const i = p.tabs.findIndex((t) => t.id === tabId);
+    const activeTabId =
+      p.activeTabId === tabId
+        ? ((tabs[i] ?? tabs[i - 1])?.id ?? null)
+        : p.activeTabId;
+    return { ...p, tabs, activeTabId };
+  });
+  panes = panes.map((p) => {
+    if (p.id !== toPaneId) return p;
+    const tabs = [...p.tabs];
+    const at =
+      beforeTabId === null ? -1 : tabs.findIndex((t) => t.id === beforeTabId);
+    tabs.splice(at < 0 ? tabs.length : at, 0, tab);
+    return { ...p, tabs, activeTabId: tabId };
+  });
+  if (from.id !== toPaneId && panes.length > 1)
+    panes = panes.filter((p) => p.id !== from.id || p.tabs.length > 0);
+  return { panes };
+}
+
+/** Close every tab whose root `isGone` (a deleted note or zoomed node). */
+export function closeTabsWhere(
+  state: WorkbenchState,
+  isGone: (rootId: string) => boolean,
+): WorkbenchState {
+  let next = state;
+  for (const pane of state.panes)
+    for (const tab of pane.tabs)
+      if (tab.rootId !== null && isGone(tab.rootId))
+        next = closeTab(next, tab.id);
+  return next;
+}
+
+/** Set every pane's relative width (missing ids keep theirs). */
+export function setPaneWidths(
+  state: WorkbenchState,
+  widths: ReadonlyMap<string, number>,
+): WorkbenchState {
+  return {
+    panes: state.panes.map((p) => {
+      const w = widths.get(p.id);
+      return w !== undefined && w > 0 && w !== p.width ? { ...p, width: w } : p;
+    }),
   };
 }
 

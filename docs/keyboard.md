@@ -19,3 +19,29 @@
 The `/` menu on any bullet lists every command (to-do, paragraph, move,
 mirror, formatting, …), and `Cmd/Ctrl+K` runs node + global actions from
 anywhere.
+
+## Workbench (columns and tabs)
+
+Wide screens only. Every action is also in `Cmd/Ctrl+K`.
+
+| Key                                                     | Action                                |
+| ------------------------------------------------------- | ------------------------------------- |
+| Mac `Ctrl+1`…`4`; Windows `Alt+1`…`4`                   | Focus column 1–4                      |
+| `Ctrl+Alt+[` / `Ctrl+Alt+]` (Mac `Ctrl+Option+[` / `]`) | Focus the column on the left / right  |
+| `Cmd/Ctrl+\`                                            | Split: open this view in a new column |
+| Mac `Ctrl+W`; others `Alt+W`                            | Close the active tab                  |
+| `Alt+[` / `Alt+]` (Mac `Option+[` / `]`)                | Previous / next tab in the column     |
+
+Chosen against the existing bindings above and the browsers' reserved keys
+(`Cmd+1…9`, `Cmd+W`, `Cmd+T/N`, `Ctrl+Tab` cannot be overridden by a web
+page). Linux Chrome keeps `Alt+1…8` for its own tabs, so on Linux use
+`Ctrl+Alt+[` / `]` or `Cmd/Ctrl+K` to move between columns. `Option` chords on
+a Mac type special characters, so the workbench matches the physical key and
+cancels the character.
+
+Mouse: click a sidebar note to preview it (italic tab, replaced by the next
+preview); double-click it, `Cmd/Ctrl+click` it, or edit in its tab to keep it
+open. Double-click a tab to keep it, middle-click to close it. Drag a tab to
+another column's tab strip to move it; drag a sidebar note onto a column to
+open it there. Drag the bar between columns to resize them, double-click it to
+make them equal.

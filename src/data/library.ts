@@ -209,3 +209,9 @@ export function useLibraryTree(): LibraryItem[] {
     [libraryRows, topLevel],
   );
 }
+
+/** The node a note row opens, or null for a folder or unknown row. */
+export function libraryNoteRoot(rowId: string): string | null {
+  const row = liveRows().find((r) => r.id === rowId);
+  return row?.type === "note" ? (row.rootNodeId ?? null) : null;
+}
