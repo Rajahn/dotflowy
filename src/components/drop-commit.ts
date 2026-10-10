@@ -1,9 +1,17 @@
+import { toast } from "sonner";
+
 import { isMirrorsEnabled } from "../data/flags";
-import { capture, drop } from "../data/history";
+import { capture, drop, type HistoryLocation } from "../data/history";
 import { getLiveNodes } from "../data/live-nodes";
 import { copySubtrees, moveNode } from "../data/mutations";
 import { runStructural } from "../data/structural";
-import { buildTreeIndex } from "../data/tree";
+import {
+  buildTreeIndex,
+  childrenOf,
+  trueSourceOf,
+  wouldMirrorCycle,
+  type TreeIndex,
+} from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
 
 /**
@@ -24,8 +32,11 @@ export function commitDrop(args: {
   parentInstanceId: string | null;
   afterId: string | null;
   copy: boolean;
+  /** Where the edit happened, for the history entry (and the tab a write
+   *  pins); default: the focused row's. */
+  location?: HistoryLocation;
 }): string[] {
-  const { nodeIds, parentInstanceId, afterId, copy } = args;
+  const { nodeIds, parentInstanceId, afterId, copy, location } = args;
   if (nodeIds.length === 0) return [];
   return runStructural(() => {
     const index = getTreeIndex();
@@ -33,7 +44,16 @@ export function commitDrop(args: {
       isMirrorsEnabled() && parentInstanceId
         ? (index.byId.get(parentInstanceId)?.mirrorOf ?? parentInstanceId)
         : parentInstanceId;
-    capture(index, nodeIds[0]!, null, { label: copy ? "copy" : "move" });
+    // A copied mirror is another mirror of the same source; one landing
+    // inside that source would be a mirror cycle, which no path may create.
+    if (copy && copiesMirrorInto(index, nodeIds, parentId)) {
+      toast("A mirror can't be copied into its own source.");
+      return [];
+    }
+    capture(index, nodeIds[0]!, null, {
+      label: copy ? "copy" : "move",
+      location,
+    });
     if (copy) {
       const copies = copySubtrees(index, nodeIds, parentId, afterId);
       if (copies.length === 0) drop();
@@ -53,4 +73,29 @@ export function commitDrop(args: {
     if (moved.length === 0) drop();
     return moved;
   });
+}
+
+/** Whether copying `ids` (with their subtrees) under `parentId` would put a
+ *  mirror inside its own source. */
+function copiesMirrorInto(
+  index: TreeIndex,
+  ids: readonly string[],
+  parentId: string | null,
+): boolean {
+  const stack = [...ids];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = index.byId.get(id);
+    if (!node) continue;
+    if (
+      node.mirrorOf &&
+      wouldMirrorCycle(index, trueSourceOf(index, id), parentId)
+    )
+      return true;
+    for (const child of childrenOf(index, id)) stack.push(child.id);
+  }
+  return false;
 }

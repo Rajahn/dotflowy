@@ -585,12 +585,26 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
           (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ??
           null,
         getListEl: () => listRef.current,
-        land: (key) => {
+        land: (id) => {
+          // As the in-column move does: the render address re-derived
+          // through mirrors, and a drop the filter hides is said out loud.
+          const key = focusKeyFor(id, id, paneId);
           pendingFocus.current = key;
           pendingFlash.current = key;
+          if (!getViewFilterFor(paneId)) return;
+          const recomputed = buildViewFilter(
+            buildTreeIndex(getLiveNodes()),
+            viewCtx,
+            isHidden,
+          );
+          if (recomputed && !recomputed.visibleIds.has(key)) {
+            pendingFocus.current = null;
+            pendingFlash.current = null;
+            toast("Moved — hidden by the current filter.");
+          }
         },
       }),
-    [paneId, refs, pendingFocus, pendingFlash],
+    [paneId, refs, pendingFocus, pendingFlash, viewCtx, isHidden],
   );
 
   // The per-bullet command set. Recreating it each render would change a prop

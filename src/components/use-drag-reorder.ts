@@ -10,6 +10,7 @@ import type { ExternalDropTargetSpec, PluginContext } from "../plugins/types";
 
 import { isMirrorsEnabled } from "../data/flags";
 import { fileNote, libraryRow } from "../data/library";
+import { getLiveNodes } from "../data/live-nodes";
 import { scrollByY, scrollViewport, scrollerOf } from "../data/pane-scroll";
 import { paneIdOf } from "../data/panes";
 import { getSelectionDragSet } from "../data/selection-fill";
@@ -25,7 +26,8 @@ import {
   instanceIdForKey,
   parentKeyOf,
 } from "../data/visible-order";
-import { focusTabById, openInPane } from "../workbench/store";
+import { activeTab } from "../workbench/model";
+import { getWorkbenchState, openInPane, revealTab } from "../workbench/store";
 import { getDragSurface, type DragSurface } from "./drag-surfaces";
 import { commitDrop } from "./drop-commit";
 import { INDENT_PX } from "./OutlineRow";
@@ -453,7 +455,7 @@ export function useDragReorder(deps: DragDeps) {
       s.hover = {
         tabId: hoverTab.tabId,
         timer: setTimeout(
-          () => focusTabById(hoverTab.paneId, hoverTab.tabId),
+          () => revealTab(hoverTab.paneId, hoverTab.tabId),
           TAB_HOVER_MS,
         ),
       };
@@ -515,6 +517,7 @@ export function useDragReorder(deps: DragDeps) {
       const core = hit instanceof Element ? coreTargetAt(hit) : null;
       setCore(core);
       if (core) {
+        s.pending = null;
         hideIndicator();
         const index = depsRef.current.getIndex();
         setRefused(
@@ -525,10 +528,18 @@ export function useDragReorder(deps: DragDeps) {
         return;
       }
 
-      // The column under the pointer; off every column, nothing to drop on.
-      const paneId = hit instanceof Element ? paneIdOf(hit) : null;
+      // The column under the pointer. Off every column (a gutter, a resize
+      // handle, outside the window) the drag's own column takes it, as before
+      // there were columns -- except over the workbench chrome.
+      const overChrome =
+        hit instanceof Element &&
+        hit.closest(".workbench-sidebar, [role='tablist']") !== null;
+      const paneId =
+        (hit instanceof Element ? paneIdOf(hit) : null) ??
+        (overChrome ? null : depsRef.current.paneId);
       const surface = paneId ? surfaceFor(paneId) : null;
       if (!paneId || !surface) {
+        s.pending = null;
         setRefused(false);
         hideIndicator();
         return;
@@ -634,11 +645,17 @@ export function useDragReorder(deps: DragDeps) {
       s.pending = { paneId, parentId, afterSiblingId };
       // A locked parent, or a drop into a carried node's own subtree (another
       // column may show the carried roots as its zoom root), is refused.
+      // Tested on the CONTENT parent: a drop under a mirror lands in its
+      // source (ADR 0022), which may be a carried node.
       const index = depsRef.current.getIndex();
+      const contentParent =
+        isMirrorsEnabled() && parentId !== null
+          ? (index.byId.get(parentId)?.mirrorOf ?? parentId)
+          : parentId;
       setRefused(
-        parentId !== null &&
-          (isNodeLocked(index, parentId) ||
-            isWithinAny(index, parentId, new Set(s.nodeIds))),
+        contentParent !== null &&
+          (isNodeLocked(index, contentParent) ||
+            isWithinAny(index, contentParent, new Set(s.nodeIds))),
       );
 
       // Indicator: a line at the gap, indented to the target depth.
@@ -665,9 +682,14 @@ export function useDragReorder(deps: DragDeps) {
   const tickScroll = useCallback(() => {
     const s = state.current;
     if (!s || !s.dragging) return;
-    const paneId = s.pending?.paneId ?? depsRef.current.paneId;
+    // Only a column under the pointer scrolls: over a tab, a tab strip or
+    // the sidebar nothing does.
+    if (!s.pending) {
+      s.raf = requestAnimationFrame(tickScroll);
+      return;
+    }
     const scroller = scrollerOf(
-      surfaceFor(paneId)?.getListEl() ?? depsRef.current.getListEl(),
+      surfaceFor(s.pending.paneId)?.getListEl() ?? depsRef.current.getListEl(),
     );
     const view = scrollViewport(scroller);
     const y = s.lastY - view.top;
@@ -735,11 +757,23 @@ export function useDragReorder(deps: DragDeps) {
       );
       return;
     }
+    // Recorded in the TARGET column's tab: the write pins it, and undo
+    // returns there.
+    const target = surfaceFor(pending.paneId);
+    const tab = activeTab(getWorkbenchState(), pending.paneId);
     const landed = commitDrop({
       nodeIds,
       parentInstanceId: pending.parentId,
       afterId: pending.afterSiblingId,
       copy,
+      location: {
+        rootId: target?.getRootId() ?? null,
+        paneId: pending.paneId,
+        tabId: tab?.id,
+        rowKey: null,
+        caret: null,
+        selection: null,
+      },
     });
     if (landed[0]) getDragSurface(pending.paneId)?.land(landed[0]);
   }
@@ -756,8 +790,12 @@ export function useDragReorder(deps: DragDeps) {
         openInPane(core.paneId, nodeIds[0]!, { preview: false });
         return;
       case "note": {
-        // The last child of the note's root.
-        const last = childrenOf(index, core.nodeId).at(-1)?.id ?? null;
+        // The last child of the note's root (its source, when the root is a
+        // mirror: that is where commitDrop puts it).
+        const parent = isMirrorsEnabled()
+          ? (index.byId.get(core.nodeId)?.mirrorOf ?? core.nodeId)
+          : core.nodeId;
+        const last = childrenOf(index, parent).at(-1)?.id ?? null;
         commitDrop({
           nodeIds,
           parentInstanceId: core.nodeId,
@@ -777,11 +815,13 @@ export function useDragReorder(deps: DragDeps) {
           afterId: top.at(-1)?.id ?? null,
           copy,
         });
-        // A root already at the end of the top level didn't move but still
-        // files into the folder.
-        const roots = landed.length
+        // A copy files its copies; a move files every carried root now at
+        // the top level, including one that was already last there (a no-op
+        // move commitDrop doesn't report).
+        const live = new Map(getLiveNodes().map((n) => [n.id, n]));
+        const roots = copy
           ? landed
-          : nodeIds.filter((id) => index.byId.get(id)?.parentId === null);
+          : nodeIds.filter((id) => live.get(id)?.parentId === null);
         for (const id of roots) fileNote(id, core.folderId);
         return;
       }

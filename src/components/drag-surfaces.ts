@@ -18,8 +18,8 @@ export interface DragSurface {
   getRowEl: (key: string) => HTMLElement | null;
   /** The `ul.outline-list` element. */
   getListEl: () => HTMLElement | null;
-  /** Focus and flash a row after a drop landed in this pane. */
-  land: (key: string) => void;
+  /** Focus and flash a node after a drop landed in this pane. */
+  land: (nodeId: string) => void;
 }
 
 const surfaces = new Map<string, DragSurface>();

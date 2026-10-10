@@ -2,8 +2,9 @@ import type { Node } from "./schema";
 
 import { isMirrorsEnabled } from "./flags";
 import { getLiveNodes } from "./live-nodes";
+import { getActivePaneId } from "./panes";
 import { buildTreeIndex } from "./tree";
-import { getViewIsHidden, getViewRootId } from "./view-state";
+import { getViewIsHiddenFor, getViewRootIdFor } from "./view-state";
 import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
 
 /**
@@ -23,14 +24,19 @@ import { buildVisibleRows, focusKeyAfterEdit } from "./visible-order";
  * Lives here rather than beside its first caller because the markdown paste
  * (ADR 0044) needs it too, from a module the editor imports.
  */
-export function focusKeyFor(instanceId: string, activeKey: string): string {
+export function focusKeyFor(
+  instanceId: string,
+  activeKey: string,
+  /** The pane whose view to walk (default: the active one). */
+  paneId: string = getActivePaneId(),
+): string {
   if (!isMirrorsEnabled()) return instanceId;
   // SAFETY: getLiveNodes() already returns Node[]; the cast only satisfies a redundant legacy annotation.
   const index = buildTreeIndex(getLiveNodes() as Node[]);
   const rows = buildVisibleRows(
     index,
-    getViewRootId(),
-    getViewIsHidden(),
+    getViewRootIdFor(paneId),
+    getViewIsHiddenFor(paneId),
     // Deliberately UNFILTERED, unlike the caret-nav walks (findVisibleNeighbor):
     // this runs synchronously inside runStructural, so getViewFilter() would be
     // the PRE-edit visibleIds -- it can't contain a just-inserted node. And key
