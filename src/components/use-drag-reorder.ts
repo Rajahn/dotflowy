@@ -9,9 +9,10 @@ import type { QueryFilter } from "../data/filter-query";
 import type { ExternalDropTargetSpec, PluginContext } from "../plugins/types";
 
 import { isMirrorsEnabled } from "../data/flags";
+import { scrollByY, scrollViewport, scrollerOf } from "../data/pane-scroll";
 import { getSelectionDragSet } from "../data/selection-fill";
 import { type Node, type TreeIndex } from "../data/tree";
-import { virtualRowRect } from "../data/virtual-nav";
+import { virtualContentTop, virtualRowRect } from "../data/virtual-nav";
 import {
   buildVisibleRows,
   instanceIdForKey,
@@ -44,7 +45,7 @@ const INDENT_FALLBACK = INDENT_PX;
 // at sibling depth instead of slipping under the row above. 0.4 means you cross
 // ~90% of an indent to nest. Tunable feel knob. See ADR 0010.
 const NEST_RESISTANCE = 0.4;
-// Distance from a viewport edge (px) that triggers auto-scroll while dragging.
+// Distance from the scroller's edge (px) that triggers auto-scroll while dragging.
 const EDGE = 72;
 // Max auto-scroll speed (px per frame) at the very edge.
 const SCROLL_MAX = 18;
@@ -330,11 +331,12 @@ export function useDragReorder(deps: DragDeps) {
     // position, estimated until it renders.
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();
-    const scrollY = window.scrollY;
     const paneId = depsRef.current.paneId;
+    // The scroller's offset, read once per projection rather than per row.
+    const contentTop = virtualContentTop(paneId) ?? undefined;
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
-      const vr = virtualRowRect(r.key, scrollY, paneId);
+      const vr = virtualRowRect(r.key, paneId, contentTop);
       if (!vr) continue;
       // Uniform indent: depth-0 left is the container left; deeper rows add
       // depth * indent (OutlineRow's paddingInlineStart). project() backs
@@ -432,18 +434,22 @@ export function useDragReorder(deps: DragDeps) {
     }
   }, []);
 
-  // Auto-scroll loop: while the pointer sits in a top/bottom edge band, scroll
-  // the window and re-project so off-screen drop targets become reachable.
+  // Auto-scroll loop: while the pointer sits in a top/bottom edge band of the
+  // list's scroller (the pane root on a wide screen, the window on a narrow
+  // one -- pane-scroll.ts), scroll it and re-project so off-screen drop
+  // targets become reachable.
   const tickScroll = useCallback(() => {
     const s = state.current;
     if (!s || !s.dragging) return;
-    const y = s.lastY;
-    const h = window.innerHeight;
+    const scroller = scrollerOf(depsRef.current.getListEl());
+    const view = scrollViewport(scroller);
+    const y = s.lastY - view.top;
+    const h = view.height;
     let dy = 0;
-    if (y < EDGE) dy = -SCROLL_MAX * (1 - y / EDGE);
-    else if (y > h - EDGE) dy = SCROLL_MAX * (1 - (h - y) / EDGE);
+    if (y < EDGE) dy = -SCROLL_MAX * (1 - Math.max(0, y) / EDGE);
+    else if (y > h - EDGE) dy = SCROLL_MAX * (1 - Math.max(0, h - y) / EDGE);
     if (dy !== 0) {
-      window.scrollBy(0, dy);
+      scrollByY(scroller, dy);
       project(s.lastX, s.lastY);
     }
     s.raf = requestAnimationFrame(tickScroll);

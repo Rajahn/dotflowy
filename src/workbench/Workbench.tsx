@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { OutlineEditor } from "../components/OutlineEditor";
 import { installLiteralPasteArm } from "../components/paste";
 import { paneIdOf, setActivePaneId } from "../data/panes";
+import { useIsMobile } from "../hooks/use-mobile";
 import { dispatchPaneAction } from "./pane-actions";
 import { PaneProvider } from "./pane-context";
 import { useWorkbenchState } from "./store";
@@ -17,17 +18,37 @@ import { useWorkbenchState } from "./store";
  */
 export function Workbench({ rootId }: Readonly<{ rootId: string | null }>) {
   const { panes } = useWorkbenchState();
+  // Narrow screens keep page scrolling (pane-scroll.ts); wide ones scroll each
+  // pane root on its own.
+  const windowScroll = useIsMobile();
   return (
     <>
       <WorkbenchHost />
       {panes.map((pane) => (
-        <PaneProvider key={pane.id} paneId={pane.id}>
-          <main data-pane-id={pane.id}>
+        <PaneProvider
+          key={pane.id}
+          paneId={pane.id}
+          windowScroll={windowScroll}
+        >
+          <main
+            data-pane-id={pane.id}
+            data-pane-scroll={windowScroll ? undefined : ""}
+            data-scroll-restoration-id={windowScroll ? undefined : pane.id}
+            className={
+              windowScroll
+                ? undefined
+                : "h-dvh [scrollbar-gutter:stable] overflow-y-auto"
+            }
+          >
             {/* Key by the zoom root so each zoom view mounts a fresh editor
                 (and a fresh title element; prevents a suppressed
                 view-transition-name from leaking between consecutive
-                zooms). */}
-            <OutlineEditor key={rootId ?? ""} rootId={rootId} />
+                zooms), and by the scroll mode, which the editor's
+                virtualizer fixes at mount. */}
+            <OutlineEditor
+              key={`${rootId ?? ""}:${windowScroll}`}
+              rootId={rootId}
+            />
           </main>
         </PaneProvider>
       ))}

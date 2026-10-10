@@ -1,4 +1,4 @@
-import type { Page, Route, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 
 import { Schema } from "effect";
 
@@ -27,6 +27,36 @@ export async function openSeededOutline(
       )
     : page.locator(".outline-list");
   await ready.waitFor({ state: "visible" });
+}
+
+/** An element's top in the outline's scroll-content frame (the first pane
+ *  root on a wide screen, the document on a narrow one), so a measure taken
+ *  before a scroll compares with one taken after it. */
+export async function outlineContentTop(locator: Locator): Promise<number> {
+  return locator.evaluate((el) => {
+    const scroller = document.querySelector<HTMLElement>("[data-pane-scroll]");
+    const top = el.getBoundingClientRect().y;
+    return scroller
+      ? top - scroller.getBoundingClientRect().y + scroller.scrollTop
+      : top + window.scrollY;
+  });
+}
+
+/** Scroll the outline: the first workbench pane root on a wide screen (each
+ *  pane scrolls on its own), the window on a narrow one. `"bottom"` scrolls to
+ *  the end. Resolves to the new scroll offset. */
+export async function scrollOutlineTo(
+  page: Page,
+  top: number | "bottom",
+): Promise<number> {
+  return page.evaluate((to) => {
+    const scroller =
+      document.querySelector<HTMLElement>("[data-pane-scroll]") ??
+      document.scrollingElement;
+    if (!scroller) return 0;
+    scroller.scrollTo(0, to === "bottom" ? scroller.scrollHeight : to);
+    return scroller.scrollTop;
+  }, top);
 }
 
 // A node as the test author cares about it -- structural fields only. Everything

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { scrollOutlineTo, seedOutline, type SeedNode } from "./fixtures";
 
 // ADR 0019: the windowed render mounts only ~viewport rows, regardless of how
 // many nodes exist. These specs prove the DOM row count stays bounded as the
@@ -60,7 +60,7 @@ test.describe("virtualized windowing (ADR 0019)", () => {
     await expect(page.locator('li[data-node-id="p39c49"]')).toHaveCount(0);
   });
 
-  test("the window follows the scroll: late rows mount, early rows unmount", async ({
+  test("the window follows the scroll, caret nav and drag cross its edge", async ({
     page,
   }) => {
     await loadBig(page);
@@ -72,14 +72,14 @@ test.describe("virtualized windowing (ADR 0019)", () => {
     // settle, so two separate reads could race). This is the "the window follows
     // the scroll" property -- asserting a deep index rather than the literal last
     // leaf, which estimate-based sizing makes finicky to hit by scrolling.
-    await page.evaluate(() => window.scrollTo(0, 20000));
+    await scrollOutlineTo(page, 20000);
     await expect
       .poll(
         () =>
           page.evaluate(() => {
             const lis = Array.from(
-              document.querySelectorAll("li[data-node-id]"),
-            ) as HTMLElement[];
+              document.querySelectorAll<HTMLElement>("li[data-node-id]"),
+            );
             const maxIdx = Math.max(
               0,
               ...lis.map((l) => Number(l.dataset.index) || 0),
@@ -92,8 +92,52 @@ test.describe("virtualized windowing (ADR 0019)", () => {
       .toBe(true);
 
     // Scroll back to the top: the first node mounts again.
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await scrollOutlineTo(page, 0);
     await expect(page.locator('li[data-node-id="p0"]')).toBeVisible();
+
+    // Caret nav walks off the bottom of the mounted window: 60 rows down from
+    // the top (p0 + its 50 children + p1 + 8 more) is p1c8, which was not
+    // mounted at the start. The outline scrolls to keep the caret on screen.
+    await expect(page.locator('li[data-node-id="p1c8"]')).toHaveCount(0);
+    const first = page.locator(
+      'li[data-node-id="p0"] > .outline-row .node-text',
+    );
+    await first.click();
+    for (let i = 0; i < 60; i++) await page.keyboard.press("ArrowDown");
+    const deep = page.locator(
+      'li[data-node-id="p1c8"] > .outline-row .node-text',
+    );
+    await expect(deep).toBeFocused();
+    await expect(deep).toBeInViewport();
+    // And back up past the top of the window, to the first row.
+    for (let i = 0; i < 60; i++) await page.keyboard.press("ArrowUp");
+    await expect(first).toBeFocused();
+    await expect(first).toBeInViewport();
+
+    // Dragging a bullet to the bottom edge auto-scrolls the outline, so a drop
+    // target far below the fold becomes reachable.
+    const bullet = page.locator('li[data-node-id="p0c1"] .bullet');
+    const from = await bullet.boundingBox();
+    if (!from) throw new Error("no bullet box");
+    const viewport = page.viewportSize()!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 10, from.y + 10, { steps: 3 });
+    await page.mouse.move(from.x + 10, viewport.height - 4, { steps: 10 });
+    // Hold at the edge until rows far below the start have scrolled in.
+    await expect(page.locator('li[data-node-id="p3"]')).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.mouse.up();
+    // The dragged node left its old slot near the top of the list.
+    await expect
+      .poll(() =>
+        page
+          .locator('li[data-node-id="p0c1"]')
+          .getAttribute("data-index")
+          .then(Number),
+      )
+      .toBeGreaterThan(100);
   });
 
   test("a deep node still indents by depth", async ({ page }) => {
