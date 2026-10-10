@@ -468,6 +468,16 @@ export function focusTabById(paneId: string, tabId: string): void {
   commit(focusTab(state, paneId, tabId));
 }
 
+/** Switch `paneId` to `tabId` without making the pane active: a bullet drag
+ *  resting on another column's tab (the drag's own column stays active, so
+ *  its drop is recorded there). */
+export function revealTab(paneId: string, tabId: string): void {
+  const pane = findPane(state, paneId);
+  if (!pane) return;
+  if (pane.activeTabId !== tabId) setIntent(tabId, { scroll: "restore" });
+  commit(focusTab(state, paneId, tabId));
+}
+
 /** Make a pane active (its editor keeps whatever it had). */
 export function focusPane(paneId: string): void {
   if (!findPane(state, paneId)) return;

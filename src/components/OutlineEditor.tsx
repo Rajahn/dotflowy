@@ -150,6 +150,7 @@ import {
   DELETE_CONFIRM_THRESHOLD,
   openDeleteConfirm,
 } from "./delete-confirm-opener";
+import { registerDragSurface } from "./drag-surfaces";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
 import { carryFocus, takeCarriedFocus } from "./focus-carry";
 import { Header } from "./Header";
@@ -568,6 +569,43 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   // Stable references (useCallback([]) inside the hook), safe to close over in
   // the memoized commands below.
   const { startDrag, consumeClick } = drag;
+
+  // This column as a drop surface for a drag started in ANY column
+  // (docs/workbench/PLAN.md 2.6): the drag projects its gap and depth on these
+  // rows, and lands focus + flash here after a drop.
+  useEffect(
+    () =>
+      registerDragSurface({
+        paneId,
+        getRootId: () => getViewRootIdFor(paneId),
+        getIsHidden: () => getViewIsHiddenFor(paneId),
+        getFilter: () => getViewFilterFor(paneId),
+        getRowEl: (key) =>
+          // SAFETY: closest returns the matched .outline-row element or null, rows are HTML elements
+          (refs.get(key)?.closest(".outline-row") as HTMLElement | null) ??
+          null,
+        getListEl: () => listRef.current,
+        land: (id) => {
+          // As the in-column move does: the render address re-derived
+          // through mirrors, and a drop the filter hides is said out loud.
+          const key = focusKeyFor(id, id, paneId);
+          pendingFocus.current = key;
+          pendingFlash.current = key;
+          if (!getViewFilterFor(paneId)) return;
+          const recomputed = buildViewFilter(
+            buildTreeIndex(getLiveNodes()),
+            viewCtx,
+            isHidden,
+          );
+          if (recomputed && !recomputed.visibleIds.has(key)) {
+            pendingFocus.current = null;
+            pendingFlash.current = null;
+            toast("Moved — hidden by the current filter.");
+          }
+        },
+      }),
+    [paneId, refs, pendingFocus, pendingFlash, viewCtx, isHidden],
+  );
 
   // The per-bullet command set. Recreating it each render would change a prop
   // on every memoized OutlineRow and re-render the whole tree on every

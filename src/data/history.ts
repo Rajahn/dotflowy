@@ -32,6 +32,7 @@ export type HistoryLabel =
   | "kind"
   | "lock"
   | "mirror"
+  | "copy"
   | "paste"
   | "import"
   | "capture";

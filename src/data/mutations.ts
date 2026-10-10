@@ -1,5 +1,6 @@
 import { nodesCollection } from "./collection";
 import { getLiveNodes } from "./live-nodes";
+import { planSubtreeCopy } from "./subtree-copy";
 import {
   type Node,
   type NodeKind,
@@ -85,6 +86,27 @@ export function insertSibling(
   }
 
   return id;
+}
+
+/**
+ * Deep-copy `ids` (each with its whole subtree) under `parentId` after
+ * `afterId` (null = first child), as one structural batch -- call inside
+ * `runStructural` (ADR 0009). The node that followed the slot is relinked
+ * behind the last copy. Returns the copied roots' new ids, in order. What a
+ * copy keeps and drops: see `planSubtreeCopy` (docs/workbench/PLAN.md 2.7).
+ */
+export function copySubtrees(
+  index: TreeIndex,
+  ids: readonly string[],
+  parentId: string | null,
+  afterId: string | null,
+): string[] {
+  if (parentId && isNodeLocked(index, parentId)) return [];
+  const plan = planSubtreeCopy(index, ids, parentId, afterId, createId, now());
+  for (const node of plan.nodes) nodesCollection.insert(node);
+  const last = plan.rootIds.at(-1);
+  if (plan.follower && last) update(plan.follower, { prevSiblingId: last });
+  return plan.rootIds;
 }
 
 /**
