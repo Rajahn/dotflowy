@@ -194,12 +194,12 @@ test("move and copy across columns, one undo each; tab, strip and sidebar target
 
   // A sidebar folder makes it a top-level note filed there.
   const folder = (await sidebar(page)
-    .getByRole("button", { name: "Archive" })
+    .getByRole("button", { name: "Archive", exact: true })
     .boundingBox())!;
   await dragBullet(page, 1, "a3", folder.x + 30, folder.y + folder.height / 2);
   await page.mouse.up();
   const archive = sidebar(page)
-    .getByRole("button", { name: "Archive" })
+    .getByRole("button", { name: "Archive", exact: true })
     .locator("xpath=ancestor::li[1]");
   await expect(
     archive.getByRole("button", { name: "Alpha three" }),
