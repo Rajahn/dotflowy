@@ -52,12 +52,16 @@ export function rankBetween(
   before: string | null | undefined,
   after: string | null | undefined,
 ): string {
-  if (before && after && before >= after) {
-    // Out-of-order siblings (two devices ranked concurrently): append after
-    // the larger rather than fail.
-    return midpoint(before, null);
+  // An empty rank (no writer of ours makes one) counts as an open end.
+  const lo = before || "";
+  const hi = after || null;
+  if (lo && hi !== null && lo >= hi) {
+    // Tied or out-of-order siblings (two devices ranked concurrently): nothing
+    // fits strictly between, so land right after `before` -- a key that
+    // extends it sorts after it and before anything above it.
+    return lo + midpoint("", null);
   }
-  return midpoint(before ?? "", after ?? null);
+  return midpoint(lo, hi);
 }
 
 /** Rank order, ties broken by id so every device draws the same list. */
@@ -98,6 +102,7 @@ export function buildLibraryTree(
   const folderIds = new Set(
     rows.filter((r) => r.type === "folder").map((r) => r.id),
   );
+  const parentOf = new Map(rows.map((r) => [r.id, r.parentId]));
   const byParent = new Map<string | null, LibraryRow[]>();
   for (const row of rows) {
     // A folder caught in a cycle (two devices moving folders into each other)
@@ -105,7 +110,7 @@ export function buildLibraryTree(
     const parent =
       row.parentId !== null &&
       folderIds.has(row.parentId) &&
-      !(row.type === "folder" && isFolderWithin(rows, row.parentId, row.id))
+      !(row.type === "folder" && folderWithin(parentOf, row.parentId, row.id))
         ? row.parentId
         : null;
     const list = byParent.get(parent);
@@ -191,7 +196,18 @@ export function isFolderWithin(
   folderId: string | null,
   ancestorId: string,
 ): boolean {
-  const parentOf = new Map(rows.map((r) => [r.id, r.parentId]));
+  return folderWithin(
+    new Map(rows.map((r) => [r.id, r.parentId])),
+    folderId,
+    ancestorId,
+  );
+}
+
+function folderWithin(
+  parentOf: ReadonlyMap<string, string | null>,
+  folderId: string | null,
+  ancestorId: string,
+): boolean {
   let cursor = folderId;
   const seen = new Set<string>();
   while (cursor !== null && !seen.has(cursor)) {

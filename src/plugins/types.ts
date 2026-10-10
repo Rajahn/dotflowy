@@ -505,8 +505,13 @@ export interface SidebarEntrySpec {
   /** Leading icon (a className-taking component, like CommandSpec.icon). */
   icon: ComponentType<{ className?: string }>;
   /** The node the entry opens, or null while it doesn't exist yet. A live
-   *  read; the sidebar re-reads it whenever it renders. */
+   *  read; the sidebar re-reads it when it renders and on `changed`. */
   nodeId(): string | null;
+  /** Subscribe to changes in `nodeId()` (an async index resolving after the
+   *  outline), returning an unsubscribe. Omit when `nodeId` is static. The
+   *  sidebar keeps the entry's node out of Unfiled with it, so a plugin node
+   *  that resolves late is never shown as fileable. */
+  changed?(cb: () => void): () => void;
   /** Open the entry in the active pane: resolve (or create) its node and call
    *  `open` with it. */
   open(open: (nodeId: string) => void): void;

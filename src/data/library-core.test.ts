@@ -117,3 +117,14 @@ test("folder containment and drop ranks", () => {
   expect(middle > "c" && middle < "g").toBe(true);
   expect(last > "g").toBe(true);
 });
+
+test("rankBetween lands right after a tied or out-of-order neighbour, and treats an empty rank as open", () => {
+  const tied = rankBetween("i", "i");
+  expect(tied > "i").toBe(true);
+  expect(tied < "r").toBe(true);
+  const swapped = rankBetween("r", "i");
+  expect(swapped > "r").toBe(true);
+  expect(swapped < "s").toBe(true);
+  expect(rankBetween("", "")).toBe(rankBetween(null, null));
+  expect(rankBetween("i", "")).toBe(rankBetween("i", null));
+});

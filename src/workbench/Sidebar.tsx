@@ -12,6 +12,8 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { Option, Schema } from "effect";
 import {
+  useCallback,
+  useMemo,
   useState,
   useSyncExternalStore,
   type DragEvent,
@@ -21,6 +23,8 @@ import {
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+
+import type { SidebarEntrySpec } from "../plugins/types";
 
 import {
   ResponsiveMenu,
@@ -47,10 +51,12 @@ import {
   type LibraryItem,
   type LibraryRow,
 } from "../data/library-core";
+import { getLiveNodes } from "../data/live-nodes";
 import { insertSibling } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
 import { getActivePaneId } from "../data/panes";
-import { runStructural } from "../data/structural";
+import { notifySaveFailed } from "../data/save-failure";
+import { runStructuralTracked } from "../data/structural";
 import { childrenOf, type TreeIndex } from "../data/tree";
 import { getTreeIndex, useNode } from "../data/tree-store";
 import { usePluginChrome } from "../plugins/registry";
@@ -79,12 +85,8 @@ export function Sidebar() {
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
 
-  const ownedByEntries = new Set(
-    sidebarEntries.flatMap((e) => {
-      const id = e.nodeId();
-      return id ? [id] : [];
-    }),
-  );
+  const entryIds = useEntryNodeIds(sidebarEntries);
+  const ownedByEntries = new Set(entryIds.flatMap((id) => (id ? [id] : [])));
   const unfiled = unfiledNodeIds(topLevel, tree, ownedByEntries);
   const folderTarget =
     currentFolder && rows.some((r) => r.id === currentFolder)
@@ -139,11 +141,11 @@ export function Sidebar() {
             Whole outline
           </SidebarRow>
         </li>
-        {sidebarEntries.map((entry) => (
+        {sidebarEntries.map((entry, i) => (
           <li key={entry.id}>
             <SidebarRow
               iconComponent={entry.icon}
-              active={activeRoot !== null && activeRoot === entry.nodeId()}
+              active={activeRoot !== null && activeRoot === entryIds[i]}
               onClick={() => entry.open((id) => open(id))}
             >
               {entry.label}
@@ -171,6 +173,7 @@ export function Sidebar() {
         <LibraryLevel
           items={tree}
           depth={0}
+          parentId={null}
           rows={rows}
           collapsed={collapsed}
           activeRoot={activeRoot}
@@ -198,6 +201,10 @@ export function Sidebar() {
 interface LevelProps {
   items: readonly LibraryItem[];
   depth: number;
+  /** The folder this level sits in AS DRAWN (null = the library root). A row
+   *  whose stored folder is gone, or caught in a cycle, is drawn at the root,
+   *  so drops beside it go by this, not by its stored parent. */
+  parentId: string | null;
   rows: readonly LibraryRow[];
   collapsed: ReadonlySet<string>;
   activeRoot: string | null;
@@ -227,6 +234,7 @@ function LibraryLevel(props: LevelProps) {
             row={item.row}
             nodeId={item.rootNodeId}
             depth={depth}
+            parentId={props.parentId}
             rows={props.rows}
             nextId={items[i + 1]?.row.id ?? null}
             active={props.activeRoot === item.rootNodeId}
@@ -251,7 +259,7 @@ function FolderItem(
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
 
   const remove = () => {
-    if (!canDeleteFolder(props.items, id) && item.children.length > 0) {
+    if (!canDeleteFolder(props.items, id)) {
       toast("Move or delete the notes in this folder first.");
       return;
     }
@@ -288,11 +296,15 @@ function FolderItem(
           if (zone === "into") {
             dropInto(drag, rows, id, null);
             setCollapsed(id, false);
+          } else if (zone === "after" && isOpen && item.children[0]) {
+            // Below an open folder's header the line sits above its first
+            // child: that is where the item goes.
+            dropInto(drag, rows, id, item.children[0].row.id);
           } else
             dropInto(
               drag,
               rows,
-              item.row.parentId,
+              props.parentId,
               zone === "before" ? id : props.nextId,
             );
         }}
@@ -360,7 +372,12 @@ function FolderItem(
       </div>
       {isOpen && item.children.length > 0 && (
         <ul>
-          <LibraryLevel {...props} items={item.children} depth={depth + 1} />
+          <LibraryLevel
+            {...props}
+            items={item.children}
+            depth={depth + 1}
+            parentId={id}
+          />
         </ul>
       )}
     </li>
@@ -371,6 +388,7 @@ function NoteItem({
   row,
   nodeId,
   depth,
+  parentId,
   rows,
   nextId,
   active,
@@ -379,12 +397,16 @@ function NoteItem({
   row: LibraryRow;
   nodeId: string;
   depth: number;
+  parentId: string | null;
   rows: readonly LibraryRow[];
   nextId: string | null;
   active: boolean;
   onOpen: (nodeId: string) => void;
 }) {
   const title = useNoteTitle(nodeId);
+  // Rename edits the source text: the title is its flattened reading, and
+  // writing that back would strip links, markup and tags.
+  const source = useNode(nodeId)?.text ?? "";
   const [renaming, setRenaming] = useState(false);
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
   return (
@@ -411,7 +433,7 @@ function NoteItem({
           dropInto(
             readLibraryDrag(e),
             rows,
-            row.parentId,
+            parentId,
             zone === "before" ? row.id : nextId,
           );
         }}
@@ -419,7 +441,7 @@ function NoteItem({
         <DropLine zone={dropZone} />
         {renaming ? (
           <RenameInput
-            initial={title}
+            initial={source}
             label="Note name"
             onDone={(next) => {
               if (next !== null) renameNote(nodeId, next);
@@ -626,7 +648,9 @@ function RenameInput({
   onDone: (next: string | null) => void;
 }) {
   const [value, setValue] = useState(initial);
-  const commit = () => onDone(value.trim() ? value : null);
+  // Blank or unchanged commits nothing (a click away is not a rename).
+  const commit = () =>
+    onDone(value.trim() && value.trim() !== initial.trim() ? value : null);
   return (
     <input
       // oxlint-disable-next-line jsx-a11y/no-autofocus -- the rename was just asked for
@@ -660,6 +684,30 @@ function DropLine({ zone }: { zone: DropZone | null }) {
         zone === "before" ? "top-0" : "bottom-0",
       )}
     />
+  );
+}
+
+/** Each plugin entry's node, re-read when the entry says it changed (Seam S). */
+function useEntryNodeIds(
+  entries: readonly SidebarEntrySpec[],
+): (string | null)[] {
+  const subscribe = useCallback(
+    (cb: () => void) => {
+      const offs = entries.flatMap((e) => (e.changed ? [e.changed(cb)] : []));
+      return () => {
+        for (const off of offs) off();
+      };
+    },
+    [entries],
+  );
+  const key = useSyncExternalStore(
+    subscribe,
+    () => entries.map((e) => e.nodeId() ?? "").join("\u0001"),
+    () => "",
+  );
+  return useMemo(
+    () => (key ? key.split("\u0001").map((id) => id || null) : []),
+    [key],
   );
 }
 
@@ -735,7 +783,7 @@ function dropInto(
 /** Create a top-level node titled "Untitled" and file it in `folderId`. One
  *  undo step removes the node (the library row stays, hidden). */
 function createNote(folderId: string | null): string | null {
-  const nodeId = runStructural(() => {
+  const { result: nodeId, persisted } = runStructuralTracked(() => {
     const index = getTreeIndex();
     capture(index, null, null, { label: "create" });
     const top = childrenOf(index, null);
@@ -747,8 +795,17 @@ function createNote(folderId: string | null): string | null {
       "Untitled",
     );
   });
-  if (!nodeId) return null;
-  fileNote(nodeId, folderId);
+  if (!nodeId) {
+    persisted.catch(notifySaveFailed);
+    return null;
+  }
+  const rowId = fileNote(nodeId, folderId);
+  // A rejected batch (the node limit, offline expiry) rolls the node back;
+  // take its library row with it rather than leave a hidden orphan.
+  persisted.catch((cause: unknown) => {
+    deleteLibraryRow(rowId);
+    notifySaveFailed(cause);
+  });
   return nodeId;
 }
 
@@ -759,19 +816,19 @@ function renameNote(nodeId: string, text: string) {
 }
 
 /** Delete a note = delete its root node's subtree, through the editor's delete
- *  funnel (protection and lock guards, the big-subtree confirm, undo). A tab
- *  showing the note steps back to the whole outline first. */
+ *  funnel (protection and lock guards, the big-subtree confirm, undo). Once
+ *  it is gone, a tab showing it steps back to the whole outline; a refused or
+ *  cancelled delete leaves the view where it was. */
 function deleteNote(nodeId: string) {
   const bridge = getNodeActionBridge();
   if (!bridge) return;
   const tab = getActivePaneTab();
-  if (
-    tab &&
-    tab.rootId !== null &&
-    isWithin(getTreeIndex(), tab.rootId, nodeId)
-  )
-    zoomPane(getActivePaneId(), null);
+  const shown =
+    tab && tab.rootId !== null && isWithin(getTreeIndex(), tab.rootId, nodeId);
   bridge.commands.onDeleteNode(nodeId);
+  // Read the collection itself: the tree index may not have caught up yet.
+  if (shown && !getLiveNodes().some((n) => n.id === nodeId))
+    zoomPane(getActivePaneId(), null);
 }
 
 function isWithin(index: TreeIndex, id: string, ancestorId: string): boolean {

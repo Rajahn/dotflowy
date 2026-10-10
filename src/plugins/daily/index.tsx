@@ -387,6 +387,7 @@ export default definePlugin({
       label: DAILY_CONTAINER_TEXT,
       icon: CalendarDaysIcon,
       nodeId: getContainerId,
+      changed: subscribeDailyIndex,
       open: (open) => {
         const existing = getContainerId();
         if (existing) {
