@@ -31,6 +31,13 @@ SPA fallback.
 
 ## Automatic production deployment
 
+> **Fork note (Rajahn/dotflowy):** this fork does not deploy on push. The
+> **App Release and Deploy** and **CLI Release** workflows keep only their
+> manual `workflow_dispatch` trigger, and the routes in `wrangler.jsonc` still
+> name upstream's zones. Self-hosting deploys by hand with `bun run deploy`
+> after pointing `wrangler.jsonc` at your own account. The rest of this section
+> describes upstream's setup.
+
 The **App Release and Deploy** workflow runs on every push to `main`. Merging
 approves the app release and production deployment. It selects current `main`,
 runs the same quality checks as CI, then:

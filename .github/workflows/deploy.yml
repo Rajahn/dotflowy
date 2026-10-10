@@ -1,8 +1,8 @@
 name: App Release and Deploy
 
+# Fork (Rajahn/dotflowy): no automatic deploy on push. This workflow targets
+# upstream's production zones, so it only runs when dispatched by hand.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # Finish the active run. GitHub replaces intermediate pending runs; the next

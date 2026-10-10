@@ -1,11 +1,7 @@
 name: CLI Release
 
+# Fork (Rajahn/dotflowy): no automatic npm release on push; dispatch by hand only.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "cli/**"
-      - ".github/workflows/cli-release.yml"
   workflow_dispatch:
     inputs:
       bootstrap_commit:

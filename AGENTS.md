@@ -4,6 +4,10 @@ Dotflowy is an outliner: nested bullets, per-user sync, and a plugin-extended ed
 
 Keep this file brief. Put task-specific guidance behind a pointer.
 
+## Fork
+
+This is `Rajahn/dotflowy`, a permanent fork of `cameronapak/dotflowy`; upstream is not synced. Multi-column workbench work: read [`docs/workbench/PLAN.md`](./docs/workbench/PLAN.md) and [`docs/workbench/STATUS.md`](./docs/workbench/STATUS.md) first.
+
 ## Gotchas
 
 - **Local dev is `bun run cf:dev` on port 8787.** `bun run dev` on :3000 has a broken database on Cam's machine. Why, and the rest of setup: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
