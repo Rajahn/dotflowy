@@ -139,6 +139,8 @@ test("move and copy across columns, one undo each; tab, strip and sidebar target
   await expect(row(page, 0, "a2")).toBeVisible();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(column(page, 1).getByText("Alpha two")).toHaveCount(0);
+  // Let the undo's focus landing finish before the next gesture starts.
+  await expect(page.locator(".node-text:focus")).toHaveCount(1);
 
   // Resting on the right column's other tab switches it; Escape cancels.
   const alphaTab = column(page, 1).getByRole("tab", {
