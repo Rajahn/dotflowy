@@ -80,7 +80,15 @@ import { openInPane, toggleSidebar } from "./store";
  * on the top or bottom edge of a row to place before or after it. Dragging an
  * unfiled node into a folder files it as a note.
  */
-export function Sidebar({ width }: Readonly<{ width: number }>) {
+export function Sidebar({
+  width,
+  drawer = false,
+}: Readonly<{
+  width: number;
+  /** Rendered inside the narrow-screen drawer (MobileLibrary.tsx), which
+   *  owns the height and the close control. */
+  drawer?: boolean;
+}>) {
   const tree = useLibraryTree();
   const rows = useLibraryRows();
   const topLevel = useTopLevelIds();
@@ -113,8 +121,13 @@ export function Sidebar({ width }: Readonly<{ width: number }>) {
   return (
     <nav
       aria-label="Library"
-      className="workbench-sidebar flex h-dvh shrink-0 flex-col overflow-y-auto border-r bg-sidebar text-sm text-sidebar-foreground"
-      style={{ width }}
+      className={cn(
+        "workbench-sidebar flex flex-col text-sm",
+        drawer
+          ? "-mx-3"
+          : "h-dvh shrink-0 overflow-y-auto border-r bg-sidebar text-sidebar-foreground",
+      )}
+      style={drawer ? undefined : { width }}
     >
       <div className="flex items-center gap-1 px-3 pt-3 pb-1">
         <span className="flex-1 text-xs font-medium text-muted-foreground">
@@ -138,11 +151,13 @@ export function Sidebar({ width }: Readonly<{ width: number }>) {
           label="New folder"
           onClick={newFolder}
         />
-        <SidebarIconButton
-          icon={SidebarLeftIcon}
-          label="Hide sidebar"
-          onClick={() => toggleSidebar()}
-        />
+        {!drawer && (
+          <SidebarIconButton
+            icon={SidebarLeftIcon}
+            label="Hide sidebar"
+            onClick={() => toggleSidebar()}
+          />
+        )}
       </div>
 
       <ul className="px-2 pb-1">

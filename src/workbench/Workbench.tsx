@@ -36,6 +36,7 @@ import {
 } from "./dnd";
 import { useActivePaneId } from "./hooks";
 import { useWorkbenchLifecycle } from "./lifecycle";
+import { MobileLibraryDrawer } from "./MobileLibrary";
 import {
   activeTabOf,
   MAX_PANES,
@@ -78,7 +79,8 @@ const PANE_MIN_PX = 280;
  * the URL follows the active tab (url-sync.ts).
  *
  * A narrow screen (< 768px) shows only the active pane and keeps page
- * scrolling (PLAN 1.9).
+ * scrolling (PLAN 1.9); its tab strip scrolls sideways, and the library is a
+ * drawer (MobileLibrary.tsx). Its other panes stay in the saved layout.
  */
 export function Workbench() {
   const { panes } = useWorkbenchState();
@@ -95,7 +97,15 @@ export function Workbench() {
     return (
       <>
         <WorkbenchHost />
-        {pane && <PaneView pane={pane} active showTabs={false} windowScroll />}
+        <MobileLibraryDrawer />
+        {pane && (
+          <PaneView
+            pane={pane}
+            active
+            showTabs={pane.tabs.length > 1}
+            windowScroll
+          />
+        )}
       </>
     );
   }
@@ -175,7 +185,10 @@ function PaneView({
   if (windowScroll) {
     return (
       <PaneProvider paneId={pane.id} windowScroll>
-        <main data-pane-id={pane.id}>{editor}</main>
+        <main data-pane-id={pane.id}>
+          {showTabs && <TabBar pane={pane} active={false} />}
+          {editor}
+        </main>
       </PaneProvider>
     );
   }
@@ -306,7 +319,8 @@ function TabBar({ pane, active }: { pane: WorkbenchPane; active: boolean }) {
   return (
     <div
       className={cn(
-        "flex h-9 shrink-0 items-stretch border-b bg-muted/40",
+        // Taller on a phone, for touch targets (ADR 0029).
+        "flex h-9 shrink-0 items-stretch border-b bg-muted/40 max-md:h-11",
         active && "shadow-[inset_0_2px_0_var(--primary)]",
       )}
     >
@@ -417,7 +431,7 @@ function TabButton({
       <button
         type="button"
         aria-label={`Close ${title}`}
-        className="-mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded opacity-60 group-hover:opacity-100 hover:bg-muted-foreground/15"
+        className="-mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded opacity-60 group-hover:opacity-100 hover:bg-muted-foreground/15 max-md:size-8"
         onClick={(e) => {
           e.stopPropagation();
           closeTabById(tab.id);

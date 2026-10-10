@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from "react";
 import type { PluginContext } from "../plugins/types";
 
 import { usePluginChrome } from "../plugins/registry";
+import { MobileLibraryButton } from "../workbench/MobileLibrary";
 import { BookmarkStar } from "./bookmarks";
 import { HeaderMoreMenu } from "./header-more-menu";
 import { CommandCenterButton } from "./node-switcher";
@@ -37,6 +38,8 @@ export function Header({
       {/* Border spans the full viewport; inner row is centered to match the
           720px outline content below. */}
       <div className="mx-auto flex max-w-[720px] items-center justify-between gap-3 px-6 py-3 max-sm:px-4">
+        {/* Narrow screens reach the library from here (a drawer). */}
+        <MobileLibraryButton />
         <div className="min-w-0 flex-1">{children}</div>
         {/* Right cluster: the spotlight-on indicator leads (ADR 0033: awareness
             + off-switch), then plugin header slots (the daily Today button),
