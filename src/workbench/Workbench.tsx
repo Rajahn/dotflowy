@@ -25,7 +25,7 @@ import {
   setActivePaneId,
 } from "../data/panes";
 import { getTreeIndex, useNode, useTrail } from "../data/tree-store";
-import { useIsMobile } from "../hooks/use-mobile";
+import { MOBILE_BREAKPOINT, useIsMobile } from "../hooks/use-mobile";
 import { moveToAdjacentColumn } from "./column-move-action";
 import {
   hasLibraryDrag,
@@ -186,7 +186,7 @@ function PaneView({
     return (
       <PaneProvider paneId={pane.id} windowScroll>
         <main data-pane-id={pane.id}>
-          {showTabs && <TabBar pane={pane} active={false} />}
+          {showTabs && <TabBar pane={pane} active={false} narrow />}
           {editor}
         </main>
       </PaneProvider>
@@ -297,7 +297,16 @@ function RecentLink({
 
 // --- the tab strip ------------------------------------------------------------
 
-function TabBar({ pane, active }: { pane: WorkbenchPane; active: boolean }) {
+function TabBar({
+  pane,
+  active,
+  narrow = false,
+}: {
+  pane: WorkbenchPane;
+  active: boolean;
+  /** The phone strip: one column, so no Split button. */
+  narrow?: boolean;
+}) {
   const paneCount = useWorkbenchState().panes.length;
   const [dropAt, setDropAt] = useState<string | null | undefined>(undefined);
   const accepts = (e: DragEvent) => hasTabDrag(e) || hasLibraryDrag(e);
@@ -319,8 +328,8 @@ function TabBar({ pane, active }: { pane: WorkbenchPane; active: boolean }) {
   return (
     <div
       className={cn(
-        // Taller on a phone, for touch targets (ADR 0029).
-        "flex h-9 shrink-0 items-stretch border-b bg-muted/40 max-md:h-11",
+        // Taller under a coarse pointer, for touch targets (ADR 0029).
+        "flex h-9 shrink-0 items-stretch border-b bg-muted/40 pointer-coarse:h-11",
         active && "shadow-[inset_0_2px_0_var(--primary)]",
       )}
     >
@@ -356,19 +365,23 @@ function TabBar({ pane, active }: { pane: WorkbenchPane; active: boolean }) {
           <span aria-hidden="true" className="my-1.5 w-0.5 bg-primary" />
         )}
       </div>
-      <button
-        type="button"
-        className="inline-flex w-9 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-        aria-label="Split right"
-        title={paneCount >= MAX_PANES ? "At most four columns" : "Split right"}
-        disabled={paneCount >= MAX_PANES}
-        onClick={() => {
-          if (pane.activeTabId) focusTabById(pane.id, pane.activeTabId);
-          splitActivePane();
-        }}
-      >
-        <Columns2Icon className="size-4" />
-      </button>
+      {!narrow && (
+        <button
+          type="button"
+          className="inline-flex w-9 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+          aria-label="Split right"
+          title={
+            paneCount >= MAX_PANES ? "At most four columns" : "Split right"
+          }
+          disabled={paneCount >= MAX_PANES}
+          onClick={() => {
+            if (pane.activeTabId) focusTabById(pane.id, pane.activeTabId);
+            splitActivePane();
+          }}
+        >
+          <Columns2Icon className="size-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -431,7 +444,7 @@ function TabButton({
       <button
         type="button"
         aria-label={`Close ${title}`}
-        className="-mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded opacity-60 group-hover:opacity-100 hover:bg-muted-foreground/15 max-md:size-8"
+        className="-mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded opacity-60 group-hover:opacity-100 hover:bg-muted-foreground/15 pointer-coarse:size-8"
         onClick={(e) => {
           e.stopPropagation();
           closeTabById(tab.id);
@@ -594,19 +607,26 @@ function onWorkbenchKey(e: KeyboardEvent): boolean {
     !e.metaKey &&
     !e.shiftKey &&
     !e.getModifierState("AltGraph");
+  // A narrow screen shows one column (PLAN 1.9): the column chords would act
+  // on columns it can't show, so they stay out of the way there.
+  const narrow = window.innerWidth < MOBILE_BREAKPOINT;
   const digit = /^Digit([1-4])$/.exec(e.code);
-  if (digit && (mac ? onlyCtrl : onlyAlt)) {
+  if (!narrow && digit && (mac ? onlyCtrl : onlyAlt)) {
     focusPaneAt(Number(digit[1]) - 1);
     return true;
   }
-  if (ctrlAlt && (e.code === "ArrowLeft" || e.code === "ArrowRight"))
+  if (!narrow && ctrlAlt && (e.code === "ArrowLeft" || e.code === "ArrowRight"))
     return moveToAdjacentColumn(e.code === "ArrowLeft" ? -1 : 1);
-  if (ctrlAlt && (e.code === "BracketLeft" || e.code === "BracketRight")) {
+  if (
+    !narrow &&
+    ctrlAlt &&
+    (e.code === "BracketLeft" || e.code === "BracketRight")
+  ) {
     focusAdjacentPane(e.code === "BracketLeft" ? -1 : 1);
     return true;
   }
   const mod = mac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-  if (mod && !e.altKey && !e.shiftKey && e.code === "Backslash") {
+  if (!narrow && mod && !e.altKey && !e.shiftKey && e.code === "Backslash") {
     if (!splitActivePane()) toast("At most four columns.");
     return true;
   }

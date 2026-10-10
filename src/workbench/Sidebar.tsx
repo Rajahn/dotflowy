@@ -136,6 +136,7 @@ export function Sidebar({
         <SidebarIconButton
           icon={NoteAddIcon}
           label="New note"
+          opens
           onClick={() => {
             const nodeId = createNote(folderTarget);
             if (folderTarget) setCollapsed(folderTarget, false);
@@ -613,6 +614,7 @@ function SidebarRow({
           "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
       )}
       aria-current={active ? "page" : undefined}
+      data-sidebar-open=""
       onClick={(e) => onClick(e.metaKey || e.ctrlKey)}
       onDoubleClick={onDoubleClick}
     >
@@ -634,17 +636,21 @@ function SidebarIconButton({
   icon,
   label,
   onClick,
+  opens = false,
 }: {
   icon: IconSvgElement;
   label: string;
   onClick: () => void;
+  /** It opens a note (the phone drawer closes on it). */
+  opens?: boolean;
 }) {
   return (
     <button
       type="button"
-      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+      className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground pointer-coarse:size-10"
       aria-label={label}
       title={label}
+      data-sidebar-open={opens ? "" : undefined}
       onClick={onClick}
     >
       <HugeiconsIcon icon={icon} className="size-4" aria-hidden="true" />
@@ -660,7 +666,7 @@ function RowMenu({ label, children }: { label: string; children: ReactNode }) {
           <button
             type="button"
             aria-label={label}
-            className="absolute right-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 data-[popup-open]:opacity-100"
+            className="absolute right-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent focus-visible:opacity-100 data-[popup-open]:opacity-100 pointer-coarse:size-9 pointer-coarse:opacity-100"
           >
             <HugeiconsIcon
               icon={MoreHorizontalIcon}
@@ -704,7 +710,9 @@ function RenameInput({
           e.preventDefault();
           commit();
         } else if (e.key === "Escape") {
+          // Cancels the rename only, not the drawer it may sit in.
           e.preventDefault();
+          e.stopPropagation();
           onDone(null);
         }
       }}

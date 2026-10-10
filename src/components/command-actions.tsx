@@ -38,6 +38,7 @@ import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
+import { useIsMobile } from "../hooks/use-mobile";
 import { signOutAndReload } from "../lib/auth-client";
 import { moveToAdjacentColumn } from "../workbench/column-move-action";
 import { useActivePaneRootId } from "../workbench/hooks";
@@ -92,6 +93,8 @@ export function useGlobalActions(opts: {
   // The active pane's zoom root: Cmd+K acts on the pane that had focus.
   const rootId = useActivePaneRootId();
   const paneCount = useWorkbenchState().panes.length;
+  // A phone shows one column (PLAN 1.9): no splitting, no column moves.
+  const narrow = useIsMobile();
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const history = useHistoryState();
 
@@ -227,7 +230,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["split", "column", "pane", "side by side"],
         hotkey: ["⌘", "\\"],
-        disabled: paneCount >= MAX_PANES,
+        disabled: narrow || paneCount >= MAX_PANES,
         run: () => void splitActivePane(),
       },
       {
@@ -255,7 +258,7 @@ export function useGlobalActions(opts: {
         icon: ArrowLeftToLineIcon,
         scope: "global",
         keywords: ["column", "pane", "left", "focus"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () => focusAdjacentPane(-1),
       },
       {
@@ -265,7 +268,7 @@ export function useGlobalActions(opts: {
         icon: ArrowRightToLineIcon,
         scope: "global",
         keywords: ["column", "pane", "right", "focus"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () => focusAdjacentPane(1),
       },
       {
@@ -277,7 +280,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["move", "column", "pane", "left", "send"],
         hotkey: ["⌃", "⌥", "←"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () =>
           void moveToAdjacentColumn(-1, getCommandCenterAmbientRowKey()),
       },
@@ -290,7 +293,7 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["move", "column", "pane", "right", "send"],
         hotkey: ["⌃", "⌥", "→"],
-        disabled: paneCount < 2,
+        disabled: narrow || paneCount < 2,
         run: () =>
           void moveToAdjacentColumn(1, getCommandCenterAmbientRowKey()),
       },
@@ -436,5 +439,6 @@ export function useGlobalActions(opts: {
     openConnect,
     daily,
     paneCount,
+    narrow,
   ]);
 }
