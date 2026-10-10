@@ -8,6 +8,22 @@
 // live, so a note never stores a second copy of its name. A FOLDER exists only
 // in the library and only groups notes. Every top-level node no visible note
 // row points at is UNFILED.
+//
+// The worker's MCP library tools (worker/mcp-tools.ts) share this module, so
+// the row schema lives here: one decoder for the client collection and the
+// agent's writes.
+
+import { Schema } from "effect";
+
+/** The stored row, decoded at both ends (the client collection, MCP). */
+export const LibraryRowSchema = Schema.Struct({
+  id: Schema.String,
+  type: Schema.Literals(["folder", "note"]),
+  parentId: Schema.NullOr(Schema.String),
+  rank: Schema.String,
+  title: Schema.optional(Schema.String),
+  rootNodeId: Schema.optional(Schema.String),
+});
 
 /** One library row, stored as a kv side-collection item. */
 export interface LibraryRow {
@@ -233,4 +249,48 @@ export function rankForDrop(
       : siblings.findIndex((r) => r.id === beforeId);
   const at = i < 0 ? siblings.length : i;
   return rankBetween(siblings[at - 1]?.rank, siblings[at]?.rank);
+}
+
+/** The rows directly inside `folderId` (null = the library root), in rank
+ *  order, minus `exceptId`. */
+export function rowsInFolder(
+  rows: readonly LibraryRow[],
+  folderId: string | null,
+  exceptId?: string,
+): LibraryRow[] {
+  return rows
+    .filter((r) => r.parentId === folderId && r.id !== exceptId)
+    .sort(compareRank);
+}
+
+// --- The Agent folder ---------------------------------------------------------
+
+/** The name of the folder agents file their new notes in (PLAN 1.10). */
+export const AGENT_FOLDER_TITLE = "Agent";
+/** The id the Agent folder gets when an agent creates it: fixed, so two agent
+ *  writes racing to create it write the same row instead of two folders. */
+export const AGENT_FOLDER_ID = "f_agent";
+
+export interface AgentFolderPlan {
+  id: string;
+  /** The folder doesn't exist yet: write it with the note. */
+  create: boolean;
+}
+
+/**
+ * Where an agent's new note goes: the first library-root folder named "Agent"
+ * (any case) the person kept or made, else a new one -- under the fixed id,
+ * unless a folder the person renamed already holds that id.
+ */
+export function agentFolderPlan(rows: readonly LibraryRow[]): AgentFolderPlan {
+  const existing = rowsInFolder(rows, null).find(
+    (r) =>
+      r.type === "folder" &&
+      r.title?.trim().toLowerCase() === AGENT_FOLDER_TITLE.toLowerCase(),
+  );
+  if (existing) return { id: existing.id, create: false };
+  const ids = new Set(rows.map((r) => r.id));
+  let id = AGENT_FOLDER_ID;
+  for (let n = 2; ids.has(id); n++) id = `${AGENT_FOLDER_ID}_${n}`;
+  return { id, create: true };
 }

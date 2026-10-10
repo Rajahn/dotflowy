@@ -7,8 +7,9 @@ import { hasCryptoRandomUuid, hasWindow } from "../env";
 import { kvDelete, kvFetch, kvPut, toKvKeys, toKvRows } from "./kv-api";
 import {
   buildLibraryTree,
-  compareRank,
+  LibraryRowSchema,
   rankForDrop,
+  rowsInFolder,
   type LibraryItem,
   type LibraryRow,
 } from "./library-core";
@@ -31,15 +32,6 @@ import { useVisibleChildIds } from "./tree-store";
  * `useLiveQuery`, which hard-fails the `/` prerender -- ADR 0004).
  */
 
-const libraryRowSchema = Schema.Struct({
-  id: Schema.String,
-  type: Schema.Literals(["folder", "note"]),
-  parentId: Schema.NullOr(Schema.String),
-  rank: Schema.String,
-  title: Schema.optional(Schema.String),
-  rootNodeId: Schema.optional(Schema.String),
-});
-
 const KV = "library";
 
 export const libraryCollection = createCollection(
@@ -49,7 +41,7 @@ export const libraryCollection = createCollection(
     queryClient,
     queryFn: () => kvFetch<LibraryRow>(KV),
     getKey: (row: LibraryRow) => row.id,
-    schema: Schema.toStandardSchemaV1(libraryRowSchema),
+    schema: Schema.toStandardSchemaV1(LibraryRowSchema),
     onInsert: async ({ transaction }) => {
       await kvPut(KV, toKvRows(transaction));
       return { refetch: false };
@@ -77,9 +69,7 @@ function newRowId(prefix: string): string {
 
 /** The rows directly inside `folderId`, in rank order, minus `exceptId`. */
 function siblingsIn(folderId: string | null, exceptId?: string): LibraryRow[] {
-  return liveRows()
-    .filter((r) => r.parentId === folderId && r.id !== exceptId)
-    .sort(compareRank);
+  return rowsInFolder(liveRows(), folderId, exceptId);
 }
 
 // --- Mutations --------------------------------------------------------------
