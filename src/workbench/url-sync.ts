@@ -1,9 +1,10 @@
 import type { HistoryLocation } from "@tanstack/history";
 
-import { useRouter } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { defaultParseSearch, useRouter } from "@tanstack/react-router";
+import { useLayoutEffect } from "react";
 
-import { getActivePaneId } from "../data/panes";
+import { getActivePaneId, subscribeActivePane } from "../data/panes";
+import { validateOutlineSearch } from "../data/tags";
 import {
   activeTab,
   urlShowsView,
@@ -50,17 +51,19 @@ interface OutlineUrl {
  */
 export function useWorkbenchUrlSync(): void {
   const router = useRouter();
-  useEffect(() => {
+  // A layout effect, so the location the page opened on is resolved before
+  // the first paint: no editor mounts for a view the URL doesn't name.
+  useLayoutEffect(() => {
     let writeToken = 0;
 
     const parse = (location: HistoryLocation): OutlineUrl | null => {
       const [, params, found] = router.getMatchedRoutes(location.pathname);
       if (found?.id !== "/" && found?.id !== "/$nodeId") return null;
-      const raw = new URLSearchParams(location.search);
-      const search: OutlineSearch = {};
-      const q = raw.get("q")?.trim();
-      if (q) search.q = q;
-      if (raw.get("focus") === "last") search.focus = "last";
+      // The router's own parser: it writes values that look like JSON (a
+      // quoted phrase, a number) JSON-encoded, and reads them back the same.
+      const search: OutlineSearch = validateOutlineSearch(
+        (router.options.parseSearch ?? defaultParseSearch)(location.search),
+      );
       const nodeId = found.id === "/$nodeId" ? (params.nodeId ?? null) : null;
       return {
         view: { rootId: nodeId, q: search.q ?? "" },
@@ -119,10 +122,13 @@ export function useWorkbenchUrlSync(): void {
       },
     );
     const unsubscribeStore = subscribeWorkbench(write);
+    // Focusing another pane changes which tab the URL shows; it replaces.
+    const unsubscribePane = subscribeActivePane(write);
     write();
     return () => {
       unsubscribeHistory();
       unsubscribeStore();
+      unsubscribePane();
     };
   }, [router]);
 }

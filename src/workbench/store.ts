@@ -1,16 +1,21 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 
+import { getNodeActionBridge } from "../data/command-bridge";
 import {
   DEFAULT_PANE_ID,
   getActivePaneId,
   setActivePaneId,
 } from "../data/panes";
+import { childrenOf } from "../data/tree";
+import { getTreeIndex } from "../data/tree-store";
+import { getViewIsHiddenFor } from "../data/view-state";
 import { hasMatchMedia, hasWindow, isBrowser } from "../env";
 import {
   activeTab,
   applyUrlResolution,
   defaultLayout,
+  focusTab,
   resolveUrlChange,
   setTabView,
   updateTab,
@@ -205,15 +210,22 @@ export function zoomPane(
   rootId: string | null,
   opts: { pivot?: string | null; transition?: boolean } = {},
 ): void {
-  const tab = activeTab(state, paneId);
-  if (!tab) return;
-  const next = updateTab(state, tab.id, (t) => zoomTab(t, { rootId, q: "" }));
-  if (next === state) return;
-  setIntent(tab.id, { pivotId: opts.pivot ?? null });
-  scrollMemory.delete(scrollKey(tab.id, rootId));
+  const zoomed = (from: WorkbenchState) => {
+    const tab = activeTab(from, paneId);
+    if (!tab) return null;
+    const next = updateTab(from, tab.id, (t) => zoomTab(t, { rootId, q: "" }));
+    return next === from ? null : { tab, next };
+  };
+  if (!zoomed(state)) return;
+  // Computed when applied, not now: a view transition runs `apply` later,
+  // and a second zoom or URL change may have landed in between.
   const apply = () => {
+    const change = zoomed(state);
+    if (!change) return;
+    setIntent(change.tab.id, { pivotId: opts.pivot ?? null });
+    scrollMemory.delete(scrollKey(change.tab.id, rootId));
     if (paneId === getActivePaneId()) urlWrite = "push";
-    commit(next);
+    commit(change.next);
   };
   if (opts.transition && paneId === getActivePaneId())
     withZoomTransition(apply);
@@ -258,14 +270,30 @@ export function followUrl(
   const moved =
     after !== undefined &&
     (before?.id !== after.id || before.rootId !== after.rootId);
-  if (moved || focusLast) {
+  if (moved) {
     setIntent(result.tabId, {
       focusLast,
+      // Browser back lands on the node you came out of, forward on the first
+      // child of the node you go into -- what a zoom out / in would do.
+      pivotId:
+        resolution.kind === "back"
+          ? (before?.rootId ?? null)
+          : resolution.kind === "forward"
+            ? target.rootId
+            : null,
       scroll:
         resolution.kind === "zoom" || resolution.kind === "open"
           ? "top"
           : "restore",
     });
+  } else if (focusLast && target.rootId !== null) {
+    // Already showing it (the Today button on today's note): no remount will
+    // read an intent, so land the caret now.
+    const isHidden = getViewIsHiddenFor(result.paneId);
+    const last = childrenOf(getTreeIndex(), target.rootId)
+      .filter((n) => !isHidden(n))
+      .at(-1);
+    if (last) getNodeActionBridge(result.paneId)?.focusNode(last.id);
   }
   if (resolution.kind === "zoom")
     scrollMemory.delete(scrollKey(result.tabId, target.rootId));
@@ -291,22 +319,17 @@ export function showForRestore(
         )
       : undefined;
   const targetPane = home?.id ?? getActivePaneId();
-  let next = state;
-  if (home && tabId) {
-    next = {
-      panes: next.panes.map((p) =>
-        p.id === home.id ? { ...p, activeTabId: tabId } : p,
-      ),
-    };
-  }
+  let next = home && tabId ? focusTab(state, home.id, tabId) : state;
   const tab = activeTab(next, targetPane);
-  if (tab && tab.rootId !== rootId) {
+  const zooms = tab !== undefined && tab.rootId !== rootId;
+  if (tab && zooms) {
     next = updateTab(next, tab.id, (t) => zoomTab(t, { rootId, q: t.q }));
     setIntent(tab.id, { scroll: "top" });
   }
   setActivePaneId(targetPane);
   if (next !== state) {
-    urlWrite = "push";
+    // A zoom pushes a history entry; only switching tabs replaces.
+    urlWrite = zooms ? "push" : "replace";
     flushSync(() => commit(next));
   }
   return targetPane;

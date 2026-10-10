@@ -4,6 +4,7 @@ import "../instrument.client";
 import type { ReactNode } from "react";
 
 import {
+  CatchBoundary,
   Outlet,
   createRootRoute,
   HeadContent,
@@ -16,6 +17,7 @@ import { AppleShortcutDialog } from "../components/apple-shortcut-dialog";
 import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
+import { ErrorScreen } from "../components/error-screen";
 import { HistoryRestoreDialog } from "../components/history-restore";
 import { MirrorPlaces } from "../components/mirror-places";
 import { MoveDialog } from "../components/move-dialog";
@@ -196,7 +198,14 @@ function OutlineWorkbench() {
     select: (s) =>
       s.matches.some((m) => m.routeId === "/" || m.routeId === "/$nodeId"),
   });
-  return onOutline ? <Workbench /> : null;
+  // Its own boundary: the workbench renders outside the leaf route's, and an
+  // editor error must not take down the root shell (theme, toasts, dialogs).
+  const href = useRouterState({ select: (s) => s.location.href });
+  return onOutline ? (
+    <CatchBoundary getResetKey={() => href} errorComponent={ErrorScreen}>
+      <Workbench />
+    </CatchBoundary>
+  ) : null;
 }
 
 /**

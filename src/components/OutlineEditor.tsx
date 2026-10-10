@@ -984,8 +984,11 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
     const scroller = paneElement(paneId);
     if (!scroller) return;
     scrollPlaced.current = true;
+    // A fresh zoom starts at the top; any other mount of this view (back and
+    // forward, a tab switch, returning from another route) restores where it
+    // was left.
     const saved =
-      intent?.scroll === "restore" ? recalledScroll(tabId, rootId) : undefined;
+      intent?.scroll === "top" ? undefined : recalledScroll(tabId, rootId);
     scroller.scrollTop = saved ?? 0;
     lastScrollTop.current = scroller.scrollTop;
   });
