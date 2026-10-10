@@ -49,7 +49,10 @@ test("folders, notes, renames, moves, filing and deletion", async ({
   await page.keyboard.type("Roadmap");
   await expect(title).toHaveText("Roadmap");
   await expect(
-    itemLi(page, "Projects").getByRole("button", { name: "Roadmap" }),
+    itemLi(page, "Projects").getByRole("button", {
+      name: "Roadmap",
+      exact: true,
+    }),
   ).toBeVisible();
 
   // Renaming a note renames its root node.
@@ -68,10 +71,16 @@ test("folders, notes, renames, moves, filing and deletion", async ({
   await folderName.press("Enter");
   await item(page, "Roadmap 2026").dragTo(item(page, "Archive"));
   await expect(
-    itemLi(page, "Archive").getByRole("button", { name: "Roadmap 2026" }),
+    itemLi(page, "Archive").getByRole("button", {
+      name: "Roadmap 2026",
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
-    itemLi(page, "Projects").getByRole("button", { name: "Roadmap 2026" }),
+    itemLi(page, "Projects").getByRole("button", {
+      name: "Roadmap 2026",
+      exact: true,
+    }),
   ).toHaveCount(0);
 
   // Unfiled lists the top-level nodes no note opens; dragging one into a
@@ -82,14 +91,19 @@ test("folders, notes, renames, moves, filing and deletion", async ({
   const unfiled = sidebar(page).getByRole("list", { name: "Unfiled" });
   await expect(unfiled.getByRole("button")).toHaveText(["Inbox", "Plans"]);
   await unfiled
-    .getByRole("button", { name: "Inbox" })
+    .getByRole("button", { name: "Inbox", exact: true })
     .dragTo(item(page, "Projects"));
   await expect(
-    itemLi(page, "Projects").getByRole("button", { name: "Inbox" }),
+    itemLi(page, "Projects").getByRole("button", {
+      name: "Inbox",
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(unfiled.getByRole("button")).toHaveText(["Plans"]);
   // Opening a note shows its outline.
-  await itemLi(page, "Projects").getByRole("button", { name: "Inbox" }).click();
+  await itemLi(page, "Projects")
+    .getByRole("button", { name: "Inbox", exact: true })
+    .click();
   await expect(title).toHaveText("Inbox");
 
   // A folder with notes can't be deleted; an empty one can.
@@ -107,6 +121,9 @@ test("folders, notes, renames, moves, filing and deletion", async ({
   // The library survives a reload (it is stored, not page state).
   await page.reload();
   await expect(
-    itemLi(page, "Archive").getByRole("button", { name: "Roadmap 2026" }),
+    itemLi(page, "Archive").getByRole("button", {
+      name: "Roadmap 2026",
+      exact: true,
+    }),
   ).toBeVisible();
 });
