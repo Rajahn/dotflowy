@@ -4,17 +4,20 @@ import "../instrument.client";
 import type { ReactNode } from "react";
 
 import {
+  CatchBoundary,
   Outlet,
   createRootRoute,
   HeadContent,
   Scripts,
   useLocation,
+  useRouterState,
 } from "@tanstack/react-router";
 
 import { AppleShortcutDialog } from "../components/apple-shortcut-dialog";
 import { AuthScreen } from "../components/auth-screen";
 import { ChangelogDialog } from "../components/changelog-dialog";
 import { DeleteConfirmDialog } from "../components/delete-confirm-dialog";
+import { ErrorScreen } from "../components/error-screen";
 import { HistoryRestoreDialog } from "../components/history-restore";
 import { MirrorPlaces } from "../components/mirror-places";
 import { MoveDialog } from "../components/move-dialog";
@@ -38,6 +41,7 @@ import {
   TEXT_SIZE_KEY,
 } from "../lib/storage-keys";
 import { TagColorStyles } from "../plugins/tags/tag-color-menu";
+import { Workbench } from "../workbench/Workbench";
 import "../styles.css";
 
 // Runs before first paint so the page never flashes the wrong theme. Mirrors
@@ -149,6 +153,7 @@ function RootComponent() {
           <TextSizeProvider>
             <AuthGate>
               <ShowCompletedProvider>
+                <OutlineWorkbench />
                 <Outlet />
                 <NodeSwitcher />
                 <QuickAdd />
@@ -180,6 +185,27 @@ function RootComponent() {
       </ThemeProvider>
     </RootDocument>
   );
+}
+
+/**
+ * The workbench, for the two outline routes (`/` and `/$nodeId`). Rendered
+ * here rather than by those routes so it stays mounted while the URL moves
+ * between them: a zoom changes one pane's tab, never the whole layout
+ * (docs/workbench/PLAN.md 2.4). The routes themselves render nothing.
+ */
+function OutlineWorkbench() {
+  const onOutline = useRouterState({
+    select: (s) =>
+      s.matches.some((m) => m.routeId === "/" || m.routeId === "/$nodeId"),
+  });
+  // Its own boundary: the workbench renders outside the leaf route's, and an
+  // editor error must not take down the root shell (theme, toasts, dialogs).
+  const href = useRouterState({ select: (s) => s.location.href });
+  return onOutline ? (
+    <CatchBoundary getResetKey={() => href} errorComponent={ErrorScreen}>
+      <Workbench />
+    </CatchBoundary>
+  ) : null;
 }
 
 /**

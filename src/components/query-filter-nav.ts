@@ -1,45 +1,23 @@
-import type { useNavigate } from "@tanstack/react-router";
-
 import { tokenizeQuery } from "../data/filter-query";
+import { getActivePaneId } from "../data/panes";
+import { getActivePaneTab, setPaneFilter } from "../workbench/store";
 
 // The `?q=` filter is CORE chrome now (the query grammar, ADR 0047 §6). This
-// module holds the route writers + the summon-opener singleton so surfaces
+// module holds the filter writers + the summon-opener registry so surfaces
 // OUTSIDE the React tree (a tags-plugin chip click, the Cmd+F hotkey, the Cmd+K
 // "Filter this view" action) can drive the filter without a hook. The React
-// half (the hook + the bar/input UI) lives in `query-filter.tsx`, which binds
-// these on mount.
+// half (the hook + the bar/input UI) lives in `query-filter.tsx`, which
+// registers on mount.
+//
+// The filter belongs to a workbench tab (docs/workbench/PLAN.md 1.3): each
+// pane's active tab has its own `?q=`, and the URL mirrors the active pane's.
+// Writers act on the ACTIVE pane -- the filter input, a chip click and Cmd+K
+// all fire from (or for) the pane that has focus.
 
-type NavigateFn = ReturnType<typeof useNavigate>;
-
-let navigateRef: NavigateFn | null = null;
-let rootIdRef: string | null = null;
-
-/** Bind live route writers for handlers that run outside React hooks. Called by
- *  `useQueryFilter` in an effect. */
-export function bindQueryFilterNav(
-  navigate: NavigateFn,
-  rootId: string | null,
-) {
-  navigateRef = navigate;
-  rootIdRef = rootId;
-}
-
-/** Write a raw `?q=` string (empty = drop the param), zoom-scoped to the current
- *  root. `replace` avoids spamming history on live-as-you-type edits. */
+/** Write a raw `?q=` string (empty = drop the param) into the active pane's
+ *  tab. `replace` avoids spamming history on live-as-you-type edits. */
 export function writeQuery(q: string, opts?: { replace?: boolean }) {
-  if (!navigateRef) return;
-  const trimmed = q.trim();
-  const nextSearch = trimmed ? { q: trimmed } : {};
-  const replace = opts?.replace ?? false;
-  const root = rootIdRef;
-  if (root === null) navigateRef({ to: "/", search: nextSearch, replace });
-  else
-    navigateRef({
-      to: "/$nodeId",
-      params: { nodeId: root },
-      search: nextSearch,
-      replace,
-    });
+  setPaneFilter(getActivePaneId(), q, { replace: opts?.replace ?? false });
 }
 
 /** Write the query from a token list (the tag-chip AND-in dedup path). */
@@ -51,60 +29,65 @@ export function writeQueryTokens(tokens: string[]) {
  *  the surface tokens already in `?q=`. Used by the tags plugin's chip click
  *  (Seam B) -- the plugin only knows "add this term", the grammar is core. */
 export function addTermToFilter(term: string) {
-  const current = tokenizeQuery(
-    new URLSearchParams(window.location.search).get("q") ?? undefined,
-  );
+  const current = tokenizeQuery(getActivePaneTab()?.q || undefined);
   if (current.includes(term)) return;
   writeQueryTokens([...current, term]);
 }
 
-// --- The summon-input opener singleton --------------------------------------
+// --- The summon-input opener registry ---------------------------------------
 
-let opener: (() => void) | null = null;
-let closer: (() => void) | null = null;
-let isOpenProbe: (() => boolean) | null = null;
-
-/** Registered by `QueryFilterBar` so Cmd+F / the header magnifier / the Cmd+K
- *  action can summon (or dismiss) the filter input from anywhere. */
-export function setFilterInputController(
-  next: {
-    open: () => void;
-    close: () => void;
-    isOpen: () => boolean;
-  } | null,
-) {
-  opener = next?.open ?? null;
-  closer = next?.close ?? null;
-  isOpenProbe = next?.isOpen ?? null;
+interface FilterInputController {
+  open: () => void;
+  close: () => void;
+  isOpen: () => boolean;
 }
 
-/** Summon the filter input (focused, prefilled if a filter is active). */
-export function openFilterInput() {
-  opener?.();
+const controllers = new Map<string, FilterInputController>();
+
+/** Registered by each pane's `QueryFilterBar` so Cmd+F / the header magnifier /
+ *  the Cmd+K action can summon (or dismiss) that pane's filter input. Returns
+ *  the unregister, which only clears the entry if it is still this one. */
+export function setFilterInputController(
+  paneId: string,
+  next: FilterInputController,
+): () => void {
+  controllers.set(paneId, next);
+  return () => {
+    if (controllers.get(paneId) === next) controllers.delete(paneId);
+  };
+}
+
+/** Summon the active pane's filter input (focused, prefilled if a filter is
+ *  active). */
+export function openFilterInput(paneId: string = getActivePaneId()) {
+  controllers.get(paneId)?.open();
 }
 
 /** Header-magnifier toggle: open when idle, dismiss (clear + collapse) when
  *  the filter row is showing. Cmd+F / Cmd+K keep the open-only path. */
-export function toggleFilterInput() {
-  if (isOpenProbe?.()) closer?.();
-  else opener?.();
+export function toggleFilterInput(paneId: string = getActivePaneId()) {
+  const controller = controllers.get(paneId);
+  if (controller?.isOpen()) controller.close();
+  else controller?.open();
 }
 
 // --- Reactive open-signal (ADR 0050) ----------------------------------------
 // `QueryFilterBar` owns whether the input is showing (`summoned || active`) in
 // local state, but `FilterButton` lives in the header and must LIGHT while the
-// input is open -- even before a query is typed. The `isOpenProbe` above is a
+// input is open -- even before a query is typed. The `isOpen` probe above is a
 // non-reactive read; this is its subscribable twin, mirroring the
-// `spotlight-mode` / `show-completed` store pattern. `QueryFilterBar` publishes
-// `showInput` here; `FilterButton` subscribes via `useSyncExternalStore`.
+// `spotlight-mode` / `show-completed` store pattern. Each pane's
+// `QueryFilterBar` publishes `showInput` here; its `FilterButton` subscribes
+// via `useSyncExternalStore`.
 
-let filterOpen = false;
+const filterOpen = new Set<string>();
 const openListeners = new Set<() => void>();
 
-/** Publish the input's open state (called by `QueryFilterBar` on change). */
-export function setFilterOpen(next: boolean) {
-  if (next === filterOpen) return;
-  filterOpen = next;
+/** Publish a pane's input open state (called by `QueryFilterBar` on change). */
+export function setFilterOpen(paneId: string, next: boolean) {
+  if (next === filterOpen.has(paneId)) return;
+  if (next) filterOpen.add(paneId);
+  else filterOpen.delete(paneId);
   for (const l of openListeners) l();
 }
 
@@ -116,7 +99,7 @@ export function subscribeFilterOpen(cb: () => void) {
   };
 }
 
-/** Snapshot of the input's open state (for `useSyncExternalStore`). */
-export function getFilterOpen() {
-  return filterOpen;
+/** Snapshot of a pane's input open state (for `useSyncExternalStore`). */
+export function getFilterOpen(paneId: string) {
+  return filterOpen.has(paneId);
 }

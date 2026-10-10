@@ -1,4 +1,3 @@
-import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Data, Effect } from "effect";
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -33,6 +32,8 @@ import { getSelectionState, selectSingle } from "../data/selection-state";
 import { runStructuralTracked, runStructuralSliced } from "../data/structural";
 import { getTreeIndex } from "../data/tree-store";
 import { getViewRootId } from "../data/view-state";
+import { activeTab } from "../workbench/model";
+import { getWorkbenchState, showForRestore } from "../workbench/store";
 import {
   setRestoreProgress,
   setRestoreProgressOpener,
@@ -99,6 +100,20 @@ const afterRenderE = Effect.callback<void>((resume) => {
   return Effect.sync(() => cancelAnimationFrame(frame));
 });
 
+/** Where an edit happens: the active pane, its active tab, and that tab's
+ *  zoom root (docs/workbench/PLAN.md 2.8). */
+function workbenchLocation(): Pick<
+  HistoryLocation,
+  "rootId" | "paneId" | "tabId"
+> {
+  const paneId = getActivePaneId();
+  return {
+    rootId: getViewRootId(),
+    paneId,
+    tabId: activeTab(getWorkbenchState(), paneId)?.id,
+  };
+}
+
 function editorLocation(focusId: string | null): HistoryLocation {
   const el = document.activeElement;
   const active =
@@ -112,7 +127,7 @@ function editorLocation(focusId: string | null): HistoryLocation {
   )
     return lastLocation;
   return {
-    rootId: getViewRootId(),
+    ...workbenchLocation(),
     rowKey: active?.dataset.historyKey ?? focusId,
     caret: active ? getSelectionRange(active) : null,
     selection: selection
@@ -320,8 +335,6 @@ const applyHistoryE = Effect.fn("History.restore")((
  */
 export function HistoryRestoreDialog() {
   const [stage, setStage] = useState<Stage>({ kind: "closed" });
-  const navigate = useNavigate();
-  const router = useRouter();
 
   useEffect(() => {
     setHistoryLocationReader(editorLocation);
@@ -370,7 +383,7 @@ export function HistoryRestoreDialog() {
       const el = event.target;
       if (el instanceof HTMLElement && el.matches(".node-text")) {
         lastLocation = {
-          rootId: getViewRootId(),
+          ...workbenchLocation(),
           rowKey: el.dataset.historyKey ?? null,
           caret: getSelectionRange(el),
           selection: null,
@@ -413,37 +426,23 @@ export function HistoryRestoreDialog() {
       Effect.gen(function* () {
         const root = plan.location?.rootId ?? null;
         const rootId = root && getTreeIndex().byId.has(root) ? root : null;
-        // The rendered view mirror can lag navigation during a zoom transition.
-        if (
-          router.state.location.pathname !==
-          (rootId ? `/${encodeURIComponent(rootId)}` : "/")
-        ) {
-          if (rootId)
-            yield* restoreAttempt(() =>
-              navigate({
-                to: "/$nodeId",
-                params: { nodeId: rootId },
-                search: (prev) => prev,
-              }),
-            );
-          else
-            yield* restoreAttempt(() =>
-              navigate({ to: "/", search: (prev) => prev }),
-            );
-        }
+        // Back to the pane and tab the edit happened in (PLAN 2.8), zoomed to
+        // its root; a closed tab falls back to the active pane.
+        const paneId = yield* Effect.sync(() =>
+          showForRestore(rootId, plan.location?.paneId, plan.location?.tabId),
+        );
         if (!plan.focusId) return;
         const key = plan.focusId;
         if (plan.location?.caret)
           setPendingCaretSelection(key, plan.location.caret);
-        getNodeActionBridge()?.focusNode(key);
+        getNodeActionBridge(paneId)?.focusNode(key);
         yield* afterRenderE;
-        // The active pane's row first (the same node may render in two
-        // panes), else anywhere -- quick-add's editor lives outside the panes.
+        // That pane's row first (the same node may render in two panes),
+        // else anywhere -- quick-add's editor lives outside the panes.
         const selector = `[data-history-key="${CSS.escape(key)}"]`;
         const el =
-          paneElement(getActivePaneId())?.querySelector<HTMLElement>(
-            selector,
-          ) ?? document.querySelector<HTMLElement>(selector);
+          paneElement(paneId)?.querySelector<HTMLElement>(selector) ??
+          document.querySelector<HTMLElement>(selector);
         if (!el) return;
         el.focus({ preventScroll: true });
         el.scrollIntoView({ block: "nearest" });
@@ -464,7 +463,7 @@ export function HistoryRestoreDialog() {
     return () => {
       returnToLocation = null;
     };
-  }, [navigate, router]);
+  }, []);
 
   useEffect(() => {
     setRestoreProgressOpener(setStage);

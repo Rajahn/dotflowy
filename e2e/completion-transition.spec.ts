@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   outlineContentTop,
   scrollOutlineTo,
+  settleOutline,
   seedOutline,
   type SeedNode,
 } from "./fixtures";
@@ -52,6 +53,7 @@ async function load(
   await seedOutline(page, nodes);
   await page.goto(path);
   await expect(text(page, "task")).toBeVisible({ timeout: 15_000 });
+  await settleOutline(page);
   await page.clock.install();
   await page.clock.pauseAt(new Date());
 }

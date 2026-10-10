@@ -1,4 +1,3 @@
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Pencil, Pin, Search, X } from "lucide-react";
 import {
   useCallback,
@@ -17,6 +16,7 @@ import {
   caretToken,
   type FilterSuggestion,
 } from "../data/filter-query";
+import { getActivePaneId } from "../data/panes";
 import {
   deleteSavedQuery,
   renameSavedQuery,
@@ -29,9 +29,10 @@ import { collectTagCorpus } from "../data/tags";
 import { getTreeIndex } from "../data/tree-store";
 import { hasWindow } from "../env";
 import { filterOperatorInfos } from "../plugins/registry";
+import { usePaneId } from "../workbench/pane-context";
+import { usePaneTab } from "../workbench/store";
 import {
   addTermToFilter,
-  bindQueryFilterNav,
   getFilterOpen,
   setFilterInputController,
   setFilterOpen,
@@ -56,20 +57,12 @@ export { addTermToFilter };
 
 const DEBOUNCE_MS = 200;
 
-/** The `?q=` filter state + route writers. Reads route state directly (no bridge
- *  needed) and owns the window-level Escape clear. */
+/** The `?q=` filter state of this pane's active tab (the URL mirrors the
+ *  active pane's), and the window-level Escape clear. */
 export function useQueryFilter() {
-  const params = useParams({ strict: false });
-  const rootId = params.nodeId ?? null;
-  const navigate = useNavigate();
-  // SAFETY: URL search params are string-valued, only the optional q string is read
-  const search = useSearch({ strict: false }) as { q?: string };
-  const rawQuery = search.q ?? "";
+  const paneId = usePaneId();
+  const rawQuery = usePaneTab(paneId)?.q ?? "";
   const active = rawQuery.trim().length > 0;
-
-  useEffect(() => {
-    bindQueryFilterNav(navigate, rootId);
-  }, [navigate, rootId]);
 
   const clear = useCallback(() => writeQuery(""), []);
 
@@ -81,6 +74,8 @@ export function useQueryFilter() {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // Only the focused pane's filter clears.
+      if (getActivePaneId() !== paneId) return;
       // A capture-phase handler already claimed this Escape (node multi-selection
       // exits, an open caret menu closes -- both preventDefault). Don't ALSO clear.
       if (e.defaultPrevented) return;
@@ -94,7 +89,7 @@ export function useQueryFilter() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, clear]);
+  }, [active, clear, paneId]);
 
   return { rawQuery, active, clear };
 }
@@ -115,14 +110,13 @@ export function useQueryFilter() {
  *  state is read from the search param directly rather than via
  *  `useQueryFilter()`, whose Escape/nav side effects would double-bind here. */
 export function FilterButton() {
-  // SAFETY: URL search params are string-valued, only the optional q string is read
-  const search = useSearch({ strict: false }) as { q?: string };
-  const active = (search.q ?? "").trim().length > 0;
+  const paneId = usePaneId();
+  const active = (usePaneTab(paneId)?.q ?? "").trim().length > 0;
   // `() => false` server snapshot keeps the header prerender-safe (the repo
   // prerenders `/`), matching every other store hook in the codebase.
   const open = useSyncExternalStore(
     subscribeFilterOpen,
-    getFilterOpen,
+    () => getFilterOpen(paneId),
     () => false,
   );
   return (
@@ -133,7 +127,7 @@ export function FilterButton() {
       // variant above takes over (solid) the moment a query bites (ADR 0050).
       className={cn(open && !active && "bg-muted text-foreground")}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={() => toggleFilterInput()}
+      onClick={() => toggleFilterInput(paneId)}
       aria-label="Filter this view"
       aria-pressed={open}
     >
@@ -425,6 +419,7 @@ function SuggestionPopover({
  * input, focused or not.
  */
 export function QueryFilterBar() {
+  const paneId = usePaneId();
   const { rawQuery, active } = useQueryFilter();
   // `summoned` keeps the input open when there's no query yet (an empty summon);
   // an active filter keeps it resident on its own. Blur with empty text drops
@@ -471,9 +466,9 @@ export function QueryFilterBar() {
   // (muted) while the box is open with no query yet (ADR 0050). Reset on unmount
   // so a torn-down editor doesn't leave the magnifier stuck "on".
   useEffect(() => {
-    setFilterOpen(showInput);
-  }, [showInput]);
-  useEffect(() => () => setFilterOpen(false), []);
+    setFilterOpen(paneId, showInput);
+  }, [paneId, showInput]);
+  useEffect(() => () => setFilterOpen(paneId, false), [paneId]);
 
   // While NOT focused, mirror the input to `?q=` -- so an external write (a tag
   // chip click AND-ing `#tag`, a shared `?q=` URL) shows up in the resident
@@ -603,16 +598,18 @@ export function QueryFilterBar() {
   );
 
   // Register the summon/dismiss controller (Cmd+K / chip taps / magnifier).
-  useEffect(() => {
-    setFilterInputController({ open, close, isOpen });
-    return () => setFilterInputController(null);
-  }, [open, close, isOpen]);
+  useEffect(
+    () => setFilterInputController(paneId, { open, close, isOpen }),
+    [paneId, open, close, isOpen],
+  );
 
   // Cmd+F summons the input (ADR 0047 §6): virtualization already broke native
   // browser find, so hijacking it is a repair. Capture phase + preventDefault,
   // works whether or not a bullet is focused.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // One input per page answers: the active pane's.
+      if (getActivePaneId() !== paneId) return;
       if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
         open();
@@ -621,7 +618,7 @@ export function QueryFilterBar() {
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, [open]);
+  }, [open, paneId]);
 
   // Focus + caret-to-end when the input is SUMMONED (not merely resident from a
   // URL query -- a page load with `?q=` must not steal the caret). Deferred a

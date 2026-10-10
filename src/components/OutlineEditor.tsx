@@ -1,11 +1,5 @@
 import { useHotkeys, type UseHotkeyDefinition } from "@tanstack/react-hotkeys";
 import {
-  Link,
-  useLocation,
-  useNavigate,
-  useSearch,
-} from "@tanstack/react-router";
-import {
   useVirtualizer,
   useWindowVirtualizer,
   type VirtualizerOptions,
@@ -132,6 +126,14 @@ import {
 } from "../plugins/registry";
 import { registerPaneActions } from "../workbench/pane-actions";
 import { usePaneId, usePaneWindowScroll } from "../workbench/pane-context";
+import {
+  consumeZoomIntent,
+  peekZoomIntent,
+  recalledScroll,
+  rememberScroll,
+  usePaneTab,
+  zoomPane,
+} from "../workbench/store";
 import { Backlinks } from "./backlinks";
 import { TitleParagraphGlyph } from "./bullet-glyph";
 import {
@@ -210,20 +212,14 @@ import {
   type MarkerPair,
 } from "./wrap";
 
-// Carry the zoom "pivot" (the node morphing between title and list-item) in
-// history state, so the incoming view knows which element to name -- and so it
-// can restore focus after the navigation.
-declare module "@tanstack/history" {
-  interface HistoryState {
-    pivotId?: string;
-  }
-}
-
 interface OutlineEditorProps {
+  /** The workbench tab this editor shows (its pane comes from context). */
+  tabId: string;
   /**
    * The node to treat as the temporary root ("zoomed in"). When null we
-   * render the whole outline from the top. Driven by the URL so zoom state
-   * survives reloads and participates in browser back/forward.
+   * render the whole outline from the top. Owned by the tab: the URL mirrors
+   * the active tab, so zoom state survives reloads and participates in
+   * browser back/forward (docs/workbench/PLAN.md 1.7).
    */
   rootId: string | null;
 }
@@ -251,7 +247,7 @@ const ROW_ESTIMATE = 36;
  *  - translating keyboard commands into mutations
  *  - the zoom view (breadcrumb + editable title) when rootId is set
  */
-export function OutlineEditor({ rootId }: OutlineEditorProps) {
+export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   // React Compiler is OFF for this component (ADR 0019). The windowed list reads
   // `virtualizer.getVirtualItems()` -- data derived from the virtualizer's
   // MUTABLE internal state behind a referentially STABLE instance. The compiler
@@ -262,7 +258,6 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   // (`commands`/`pluginCtx` via useMemo/useCallback, narrow store slices), so
   // rows stay memoized and a keystroke still re-renders only its own bullet.
   "use no memo";
-  const navigate = useNavigate();
   // The workbench pane this editor renders in. Every event-time read of view
   // state, virtual nav and the command bridge goes through it, so two columns
   // never answer for each other (docs/workbench/PLAN.md 2.2).
@@ -296,9 +291,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     exposeHotkeyManagerForDev();
   }, []);
 
-  // SAFETY: URL search params are string-valued, only optional string fields are read
-  const routeSearch = useSearch({ strict: false }) as RouteSearch;
-  const focusLast = routeSearch.focus === "last";
+  // The tab's own `?q=` filter (the URL mirrors it only for the active tab).
+  const q = usePaneTab(paneId)?.q ?? "";
+  const routeSearch = useMemo<RouteSearch>(() => (q ? { q } : {}), [q]);
+  // What this view's mount should do once: the zoom pivot to name and land
+  // focus by, `/today`'s focus=last, and where to start scrolled. Captured at
+  // mount (the editor remounts per view) and consumed in the mount effects.
+  const [intent] = useState(() => peekZoomIntent(tabId));
+  const focusLast = intent?.focusLast ?? false;
 
   // Seam G (ADR 0001): the composed per-node visibility predicate. The core no
   // longer hardcodes `completed` -- it hides whatever the plugin view transforms
@@ -350,11 +350,14 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     rootId,
     isHidden,
     refs,
-    navigate,
     pendingFocus,
     pendingFlash,
     focusLast,
+    pivotAtMount: intent?.pivotId ?? null,
   });
+  useEffect(() => {
+    if (intent) consumeZoomIntent(intent);
+  }, [intent]);
 
   // Undo, redo and zoom-out are window chords the workbench host registers
   // ONCE and dispatches to the active pane (pane-actions.ts); this editor
@@ -577,11 +580,11 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
       mutations: commands,
       nav: {
         zoom: (id) => navigateZoom(id, id),
-        // Plain navigation: no `view-transition` opts and no `pivotId` state, so
-        // the incoming title carries no stale morph name and the mount focus
-        // effect (which keys off pivotId) leaves the caret alone. The content
-        // just swaps. See ADR 0054 (the week strip's pill IS the transition).
-        open: (id) => navigate({ to: "/$nodeId", params: { nodeId: id } }),
+        // Plain zoom: no view transition and no pivot, so the incoming title
+        // carries no stale morph name and the mount focus effect (which keys
+        // off the pivot) leaves the caret alone. The content just swaps. See
+        // ADR 0054 (the week strip's pill IS the transition).
+        open: (id) => zoomPane(paneId, id),
       },
       openOverlay: (node) => setOverlayNode(node),
       openPanel: (node) => setPanelNode(node),
@@ -602,7 +605,7 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         set.add(fiber);
       },
     }),
-    [commands, navigateZoom, navigate],
+    [commands, navigateZoom, paneId],
   );
 
   // Interrupt any still-running plugin fibers when the editor unmounts (ADR 0039).
@@ -875,10 +878,23 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
   useLayoutEffect(() => {
     const measure = () => {
       const el = listRef.current;
-      if (el)
-        setScrollMargin(
-          contentY(scrollerOf(el), el.getBoundingClientRect().top),
-        );
+      if (!el) return;
+      const scroller = scrollerOf(el);
+      // The layout position, not the painted one: the content's one-shot
+      // entrance (.outline-reveal) slides the list in with a transform, and a
+      // margin measured mid-slide would offset every row for the whole view.
+      let shift = 0;
+      for (
+        let a: HTMLElement | null = el;
+        a && a !== scroller;
+        a = a.parentElement
+      ) {
+        const t = getComputedStyle(a).transform;
+        if (t !== "none") shift += new DOMMatrixReadOnly(t).m42;
+      }
+      setScrollMargin(
+        contentY(scroller, el.getBoundingClientRect().top - shift),
+      );
     };
     measure();
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
@@ -888,7 +904,9 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     const ro = new ResizeObserver(measure);
     ro.observe(header);
     return () => ro.disconnect();
-  }, [rootId, zoomedNode?.id]);
+    // `loading`: an editor mounted before the outline synced renders the
+    // skeleton first; the list (and its margin) exists only once it ends.
+  }, [rootId, zoomedNode?.id, loading]);
   const useListVirtualizer = windowScroll
     ? useWindowListVirtualizer
     : usePaneListVirtualizer;
@@ -969,12 +987,54 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     [paneId, virtualizer, windowScroll],
   );
 
+  // Per-view scroll memory for a pane root that scrolls on its own (wide
+  // screens; the router still restores the window on narrow ones). A fresh
+  // zoom starts at the top; a back/forward step or a return to the tab
+  // restores where this view was left. Placed once, on the first render with
+  // content, so the list already has its (estimated) height.
+  const scrollPlaced = useRef(false);
+  const lastScrollTop = useRef(0);
+  useLayoutEffect(() => {
+    if (windowScroll || loading || scrollPlaced.current) return;
+    const scroller = paneElement(paneId);
+    if (!scroller) return;
+    scrollPlaced.current = true;
+    // A fresh zoom starts at the top; any other mount of this view (back and
+    // forward, a tab switch, returning from another route) restores where it
+    // was left.
+    const saved =
+      intent?.scroll === "top" ? undefined : recalledScroll(tabId, rootId);
+    scroller.scrollTop = saved ?? 0;
+    lastScrollTop.current = scroller.scrollTop;
+  });
+  useEffect(() => {
+    if (windowScroll) return;
+    const scroller = paneElement(paneId);
+    if (!scroller) return;
+    const onScroll = () => {
+      lastScrollTop.current = scroller.scrollTop;
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      rememberScroll(tabId, rootId, lastScrollTop.current);
+    };
+  }, [windowScroll, paneId, tabId, rootId]);
+
   // Deep-linked to a node that no longer exists (and the store has loaded).
   if (rootId !== null && zoomedNode === null && hasNodes) {
     return (
       <div className="mx-auto max-w-[720px] p-6 max-sm:px-4">
         <div className="outline-empty">
-          That bullet doesn't exist. <Link to="/">Back to top</Link>.
+          That bullet doesn't exist.{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => zoomPane(paneId, null)}
+          >
+            Back to top
+          </button>
+          .
         </div>
       </div>
     );
@@ -1408,7 +1468,9 @@ interface ZoomNavigationArgs {
   rootId: string | null;
   isHidden: (node: Node) => boolean;
   refs: Map<string, HTMLSpanElement | null>;
-  navigate: ReturnType<typeof useNavigate>;
+  /** The zoom pivot this view mounted with (the tab's one-shot intent), or
+   *  null on a plain view change. */
+  pivotAtMount: string | null;
   // Focus plumbing, for landing focus on a post-nav row that's off-screen in the
   // windowed list (the row claims pendingFocus/pendingFlash on its mount).
   pendingFocus: RefObject<string | null>;
@@ -1422,25 +1484,24 @@ interface ZoomNavigationArgs {
 /**
  * Zoom navigation: the shared-element morph between a node's title and list-item
  * roles, Cmd+, zoom-out, and the focus landing after a navigation. Returns the
- * stable `navigateZoom`, the Cmd+, `zoomOut`, and the current pivot id. The mount-only effects rely on
- * the editor remounting per zoom view (its `key={nodeId}`; see
- * docs/architecture.md "`rootId` is route-owned").
+ * stable `navigateZoom`, the Cmd+, `zoomOut`, and the current pivot id. The
+ * mount-only effects rely on the editor remounting per zoom view (its
+ * `key={tab.id + rootId}`; see docs/architecture.md "`rootId` is tab-owned").
  */
 function useZoomNavigation({
   paneId,
   rootId,
   isHidden,
   refs,
-  navigate,
   pendingFocus,
   pendingFlash,
   focusLast,
+  pivotAtMount,
 }: ZoomNavigationArgs) {
   // The "pivot" of the last zoom: the node that swaps between title and list-
-  // item roles. The incoming view reads it from history state and names that
-  // node's element so the browser morphs it across the navigation.
-  const location = useLocation();
-  const pivotId = location.state.pivotId ?? null;
+  // item roles. The incoming view reads it from the tab's zoom intent and
+  // names that node's element so the browser morphs it across the zoom.
+  const pivotId = pivotAtMount;
   // pivotId is read only at event time (navigateZoom's morph-retarget), so
   // mirror it into a ref written AFTER commit -- not during render -- so nothing
   // here trips the React Compiler's ref-during-render bailout. One reader, so a
@@ -1459,12 +1520,11 @@ function useZoomNavigation({
    */
   const navigateZoom = useCallback(
     (toRootId: string | null, pivot: string) => {
-      // Navigation changes the view root, never saved expansion state.
+      // Zooming changes the tab's view root, never saved expansion state. The
+      // tab (not the router) owns the root; the URL follows the active tab.
       if (prefersReducedMotion()) {
         // No morph, but still carry the pivot so the new view restores focus.
-        const state = { pivotId: pivot };
-        if (toRootId === null) navigate({ to: "/", state });
-        else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, state });
+        zoomPane(paneId, toRootId, { pivot });
         return;
       }
       // Retarget the morph name from this view's current pivot onto the new one.
@@ -1479,17 +1539,12 @@ function useZoomNavigation({
         el.style.setProperty("view-transition-name", "zoom-target");
         el.classList.add("vt-morph");
       }
-      const opts = {
-        state: { pivotId: pivot },
-        viewTransition: { types: ["zoom"] },
-      };
-      if (toRootId === null) navigate({ to: "/", ...opts });
-      else navigate({ to: "/$nodeId", params: { nodeId: toRootId }, ...opts });
+      zoomPane(paneId, toRootId, { pivot, transition: true });
     },
-    // navigate is stable (useNavigate with no args returns a referentially
-    // stable callback), so navigateZoom -- and therefore commands -- keeps its
-    // identity across renders. refs is a stable ref object.
-    [refs, navigate],
+    // paneId is fixed per editor and refs is a stable ref object, so
+    // navigateZoom -- and therefore commands -- keeps its identity across
+    // renders.
+    [paneId, refs],
   );
 
   // Cmd/Ctrl+,: zoom out one level -- navigate to the current root's parent,

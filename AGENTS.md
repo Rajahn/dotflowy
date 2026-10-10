@@ -43,7 +43,7 @@ New feature or design: `ls docs/adr/` and read the ADRs that match the surface. 
 
 ## Architecture
 
-Find owners and tests by task: [`architecture task map`](./docs/architecture.md#task-map). Data model, new `Node` field, tree reads: [`docs/architecture.md`](./docs/architecture.md). **`rootId` is route-owned.** Setup and local dev: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Find owners and tests by task: [`architecture task map`](./docs/architecture.md#task-map). Data model, new `Node` field, tree reads: [`docs/architecture.md`](./docs/architecture.md). **`rootId` is tab-owned:** the workbench store owns each pane's view and the URL mirrors the active tab ([ADR 0069](./docs/adr/0069-pane-owned-view-root-and-workbench-urls.md)). Setup and local dev: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Editor
 

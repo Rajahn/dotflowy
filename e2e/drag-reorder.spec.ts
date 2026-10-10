@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { seedOutline, type SeedNode } from "./fixtures";
+import { seedOutline, settleOutline, type SeedNode } from "./fixtures";
 
 // Pointer drag-to-reorder on the windowed path (ADR 0019 + ADR 0010). The drop
 // hit-test synthesizes row rects from the virtualizer's measurements
@@ -27,6 +27,7 @@ async function load(page: Page) {
   await expect(
     page.locator('li[data-node-id="a0"] > .outline-row .node-text'),
   ).toBeVisible();
+  await settleOutline(page);
 }
 
 const rowBox = async (page: Page, id: string) => {
@@ -38,10 +39,10 @@ const rowBox = async (page: Page, id: string) => {
 // The rendered order of mounted rows, by the virtualizer's flat index.
 const visibleOrder = (page: Page) =>
   page.evaluate(() =>
-    Array.from(document.querySelectorAll("li[data-node-id]"))
+    Array.from(document.querySelectorAll<HTMLElement>("li[data-node-id]"))
       .map((li) => ({
-        id: (li as HTMLElement).dataset.nodeId!,
-        index: Number((li as HTMLElement).dataset.index),
+        id: li.dataset.nodeId ?? "",
+        index: Number(li.dataset.index),
       }))
       .sort((x, y) => x.index - y.index)
       .map((r) => r.id),
