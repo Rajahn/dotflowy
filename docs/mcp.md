@@ -89,7 +89,8 @@ The app's sidebar files top-level nodes as **notes** in **folders**
 ([ADR 0070](./adr/0070-library-folders-and-notes.md)). `list_library` reads
 the folder tree (folder ids, and each note's top-level node id for
 `get_outline`) and then the unfiled top-level nodes. `create_folder` adds a
-folder; `move_note` refiles a note, or files an unfiled top-level node.
+folder; `move_note` refiles a note, or files an unfiled top-level node (not
+the Daily container, which has its own sidebar entry).
 `create_note` writes a new top-level bullet (its title, plus an optional
 `add_subtree`-style forest under it) and files it in the **Agent** folder
 unless given a folder: the user collects agent material there and drags what

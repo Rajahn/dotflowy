@@ -140,8 +140,12 @@ test("agentFolderPlan reuses a top-level folder named Agent in any case, else cl
     id: "f1",
     create: false,
   });
-  // A nested "Agent" folder doesn't count.
-  expect(agentFolderPlan([named("f1", "Agent", "f0")]).create).toBe(true);
+  // A nested "Agent" folder doesn't count; one whose parent is gone is drawn
+  // at the top, so it does.
+  expect(
+    agentFolderPlan([named("f0", "Work"), named("f1", "Agent", "f0")]).create,
+  ).toBe(true);
+  expect(agentFolderPlan([named("f1", "Agent", "gone")]).id).toBe("f1");
 });
 
 test("agentFolderPlan leaves a renamed folder its fixed id and takes another", () => {

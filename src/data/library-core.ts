@@ -1,7 +1,7 @@
 // Pure logic for the library: the sidebar's folders and notes
-// (docs/workbench/PLAN.md 1.2, 2.5). Dependency-free on purpose -- the
-// `saved-queries-core.ts` discipline: no collection imports, no DOM, so it stays
-// bun-testable. The collection + reactive reads live in `library.ts`.
+// (docs/workbench/PLAN.md 1.2, 2.5). The `saved-queries-core.ts` discipline:
+// no collection imports, no DOM (only Effect Schema, for the row decoder), so
+// it stays bun-testable. The collection + reactive reads live in `library.ts`.
 //
 // A NOTE is an ordinary top-level outline node (`parentId === null`) that the
 // library has registered under a folder; its title is that node's text, read
@@ -15,8 +15,9 @@
 
 import { Schema } from "effect";
 
-/** The stored row, decoded at both ends (the client collection, MCP). */
-export const LibraryRowSchema = Schema.Struct({
+/** The stored row, decoded at both ends (the client collection, MCP). Typed
+ *  against {@link LibraryRow}, so the two can't drift apart. */
+export const LibraryRowSchema: Schema.Codec<LibraryRow> = Schema.Struct({
   id: Schema.String,
   type: Schema.Literals(["folder", "note"]),
   parentId: Schema.NullOr(Schema.String),
@@ -278,18 +279,24 @@ export interface AgentFolderPlan {
 }
 
 /**
- * Where an agent's new note goes: the first library-root folder named "Agent"
- * (any case) the person kept or made, else a new one -- under the fixed id,
- * unless a folder the person renamed already holds that id.
+ * Where an agent's new note goes: the first folder named "Agent" (any case)
+ * drawn at the top of the library, else a new one -- under the fixed id,
+ * unless a row already holds that id (`taken` also counts stored rows that
+ * didn't decode).
  */
-export function agentFolderPlan(rows: readonly LibraryRow[]): AgentFolderPlan {
-  const existing = rowsInFolder(rows, null).find(
-    (r) =>
-      r.type === "folder" &&
-      r.title?.trim().toLowerCase() === AGENT_FOLDER_TITLE.toLowerCase(),
+export function agentFolderPlan(
+  rows: readonly LibraryRow[],
+  taken: ReadonlySet<string> = new Set(),
+): AgentFolderPlan {
+  // Drawn at the top: a folder whose parent is gone, or caught in a cycle,
+  // shows there too (buildLibraryTree).
+  const existing = buildLibraryTree(rows, new Set()).find(
+    (item) =>
+      item.kind === "folder" &&
+      item.row.title?.trim().toLowerCase() === AGENT_FOLDER_TITLE.toLowerCase(),
   );
-  if (existing) return { id: existing.id, create: false };
-  const ids = new Set(rows.map((r) => r.id));
+  if (existing) return { id: existing.row.id, create: false };
+  const ids = new Set([...taken, ...rows.map((r) => r.id)]);
   let id = AGENT_FOLDER_ID;
   for (let n = 2; ids.has(id); n++) id = `${AGENT_FOLDER_ID}_${n}`;
   return { id, create: true };

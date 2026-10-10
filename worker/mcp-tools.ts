@@ -34,6 +34,7 @@ import {
   type LibraryItem,
   type LibraryRow,
   LibraryRowSchema,
+  rankBetween,
   rankForDrop,
   rowsInFolder,
   unfiledNodeIds,
@@ -90,11 +91,13 @@ export interface OutlineStore {
     expectedWeekStart?: WeekStart,
   ): number | Promise<number>;
   getKv(collection: string): unknown[] | Promise<unknown[]>;
+  /** Atomic get-or-create on one kv key: the stored value wins. The DO stores
+   *  any JSON row; callers decode what comes back. */
   getOrCreateKv(
     collection: string,
     key: string,
-    value: KvClaim,
-  ): KvClaim | Promise<KvClaim>;
+    value: KvClaim | LibraryRow,
+  ): KvClaim | LibraryRow | Promise<KvClaim | LibraryRow>;
   /** Insert or replace kv rows (the library tools write folders and notes). */
   upsertKv(
     collection: string,
@@ -948,28 +951,53 @@ const kvCall = <A>(run: () => A | Promise<A>): Effect.Effect<A, ToolError> =>
         : new ToolError({ reason: String(error) }),
   });
 
-/** Every well-formed library row. A malformed row (an older or foreign write)
- *  is skipped, as the client collection's schema would reject it. */
+/** The library as stored: its well-formed rows (a malformed one, an older or
+ *  foreign write, is skipped, as the client collection's schema would reject
+ *  it), each row's full stored record (a write keeps fields this version
+ *  doesn't know), and every stored id, malformed rows included. */
+const StoredRecord = Schema.Record(Schema.String, Schema.Json);
+type StoredRecord = typeof StoredRecord.Type;
+
+interface StoredLibrary {
+  rows: LibraryRow[];
+  records: ReadonlyMap<string, StoredRecord>;
+  ids: ReadonlySet<string>;
+}
+
 const loadLibrary = (
   store: OutlineStore,
-): Effect.Effect<LibraryRow[], ToolError> =>
+): Effect.Effect<StoredLibrary, ToolError> =>
   Effect.map(
     kvCall(() => store.getKv(KV_LIBRARY)),
-    (raw) =>
-      raw.flatMap((value) => {
+    (raw) => {
+      const rows: LibraryRow[] = [];
+      const records = new Map<string, StoredRecord>();
+      const ids = new Set<string>();
+      for (const value of raw) {
+        const record = Schema.decodeUnknownOption(StoredRecord)(value);
         const row = Schema.decodeUnknownOption(LibraryRowSchema)(value);
-        return row._tag === "Some" ? [row.value] : [];
-      }),
+        if (record._tag === "Some" && Object.hasOwn(record.value, "id"))
+          ids.add(String(record.value["id"]));
+        if (row._tag === "None" || record._tag === "None") continue;
+        rows.push(row.value);
+        records.set(row.value.id, record.value);
+      }
+      return { rows, records, ids };
+    },
   );
 
 const saveLibrary = (
   store: OutlineStore,
   rows: readonly LibraryRow[],
+  records: StoredLibrary["records"] = new Map(),
 ): Effect.Effect<void, ToolError> =>
   kvCall(() =>
     store.upsertKv(
       KV_LIBRARY,
-      rows.map((value) => ({ key: value.id, value })),
+      rows.map((row) => ({
+        key: row.id,
+        value: { ...records.get(row.id), ...row },
+      })),
     ),
   );
 
@@ -978,6 +1006,34 @@ const libraryId = (prefix: "f" | "n"): string => `${prefix}_${createId()}`;
 /** A top-level node's title as an agent reads it. */
 const noteTitle = (index: TreeIndex, nodeId: string): string =>
   redactSpoilers(index.byId.get(nodeId)?.text.trim() || "Untitled");
+
+/** The Agent folder's id, creating it if needed -- through the DO's atomic
+ *  get-or-create, so two agent calls racing to create it make one folder and
+ *  neither overwrites a folder that appeared (or was renamed) meanwhile. */
+const claimAgentFolder = (
+  store: OutlineStore,
+  library: StoredLibrary,
+): Effect.Effect<{ id: string; title: string | undefined }, ToolError> =>
+  Effect.gen(function* () {
+    const plan = agentFolderPlan(library.rows, library.ids);
+    if (!plan.create) return { id: plan.id, title: AGENT_FOLDER_TITLE };
+    const folder: LibraryRow = {
+      id: plan.id,
+      type: "folder",
+      parentId: null,
+      rank: rankForDrop(rowsInFolder(library.rows, null), null),
+      title: AGENT_FOLDER_TITLE,
+    };
+    const stored = yield* kvCall(() =>
+      store.getOrCreateKv(KV_LIBRARY, plan.id, folder),
+    );
+    const row = Schema.decodeUnknownOption(LibraryRowSchema)(stored);
+    if (row._tag === "None" || row.value.type !== "folder")
+      return yield* Effect.fail(
+        new ToolError({ reason: `library row "${plan.id}" is not a folder` }),
+      );
+    return { id: row.value.id, title: row.value.title };
+  });
 
 /** A folder id the caller passed must name a folder. */
 const requireFolder = (
@@ -1564,9 +1620,10 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: true,
     handle: (_input: typeof ListLibraryInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store);
-        const rows = yield* loadLibrary(store);
-        const daily = yield* loadDailyReverseMap(store);
+        const [index, { rows }, daily] = yield* Effect.all(
+          [loadIndex(store), loadLibrary(store), loadDailyReverseMap(store)],
+          { concurrency: "unbounded" },
+        );
         const topLevel = childrenOf(index, null).map((n) => n.id);
         const tree = buildLibraryTree(rows, new Set(topLevel));
         const container = [...daily].find(([, key]) => key === CONTAINER_KEY);
@@ -1607,7 +1664,7 @@ export const tools: ReadonlyArray<ToolDef> = [
           return yield* Effect.fail(
             new ToolError({ reason: "the folder needs a title" }),
           );
-        const rows = yield* loadLibrary(store);
+        const { rows } = yield* loadLibrary(store);
         const parentId = input.parentFolderId ?? null;
         if (parentId !== null) yield* requireFolder(rows, parentId);
         const folder: LibraryRow = {
@@ -1638,12 +1695,12 @@ export const tools: ReadonlyArray<ToolDef> = [
           );
         // Resolve the folder BEFORE writing any node, so a bad folder id
         // leaves nothing behind.
-        const rows = yield* loadLibrary(store);
-        const agent = input.folderId == null ? agentFolderPlan(rows) : null;
+        const [library, index] = yield* Effect.all(
+          [loadLibrary(store), loadIndex(store)],
+          { concurrency: "unbounded" },
+        );
+        const { rows } = library;
         if (input.folderId != null) yield* requireFolder(rows, input.folderId);
-        const folderId = agent ? agent.id : input.folderId!;
-
-        const index = yield* loadIndex(store);
         const timestamp = yield* clock;
         const plan = yield* unwrap(
           planAddSubtree(index, {
@@ -1659,25 +1716,24 @@ export const tools: ReadonlyArray<ToolDef> = [
         yield* commit(store, plan.ops);
         const nodeId = plan.rootIds[0]!;
 
-        const written: LibraryRow[] = [];
-        if (agent?.create)
-          written.push({
-            id: agent.id,
-            type: "folder",
-            parentId: null,
-            rank: rankForDrop(rowsInFolder(rows, null), null),
-            title: AGENT_FOLDER_TITLE,
-          });
-        written.push({
-          id: libraryId("n"),
-          type: "note",
-          parentId: folderId,
-          rank: rankForDrop(rowsInFolder(rows, folderId), null),
-          rootNodeId: nodeId,
-        });
         // Not atomic with the node write (kv and nodes are separate stores): if
-        // this fails, the note still exists, unfiled, and the error says so.
-        yield* saveLibrary(store, written).pipe(
+        // filing fails, the note still exists, unfiled, and the error says so.
+        const filed = Effect.gen(function* () {
+          const folder =
+            input.folderId != null
+              ? { id: input.folderId, title: undefined }
+              : yield* claimAgentFolder(store, library);
+          yield* saveLibrary(store, [
+            {
+              id: libraryId("n"),
+              type: "note",
+              parentId: folder.id,
+              rank: rankForDrop(rowsInFolder(rows, folder.id), null),
+              rootNodeId: nodeId,
+            },
+          ]);
+          return folder;
+        }).pipe(
           Effect.mapError(
             (e) =>
               new ToolError({
@@ -1685,9 +1741,11 @@ export const tools: ReadonlyArray<ToolDef> = [
               }),
           ),
         );
-        const folderName = agent
-          ? AGENT_FOLDER_TITLE
-          : (rows.find((r) => r.id === folderId)?.title ?? folderId);
+        const folder = yield* filed;
+        const folderName =
+          folder.title ??
+          rows.find((r) => r.id === folder.id)?.title ??
+          folder.id;
         return mcpReceipt(
           `Created note "${title}" (node id: ${nodeId}) in folder "${folderName}":\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
         );
@@ -1701,7 +1759,10 @@ export const tools: ReadonlyArray<ToolDef> = [
     readOnly: false,
     handle: (input: typeof MoveNoteInput.Type, store) =>
       Effect.gen(function* () {
-        const index = yield* loadIndex(store);
+        const [index, library, daily] = yield* Effect.all(
+          [loadIndex(store), loadLibrary(store), loadDailyReverseMap(store)],
+          { concurrency: "unbounded" },
+        );
         const node = index.byId.get(input.nodeId);
         if (!node)
           return yield* Effect.fail(
@@ -1713,43 +1774,52 @@ export const tools: ReadonlyArray<ToolDef> = [
               reason: `node "${input.nodeId}" is not top-level, and only top-level nodes are notes — move it to the top level with move_nodes first`,
             }),
           );
-        const rows = yield* loadLibrary(store);
+        if (daily.get(node.id) === CONTAINER_KEY)
+          return yield* Effect.fail(
+            new ToolError({
+              reason:
+                "the Daily container has its own sidebar entry and can't be filed in a folder",
+            }),
+          );
+        const { rows, records } = library;
         const folderId = input.folderId ?? null;
         if (folderId !== null) yield* requireFolder(rows, folderId);
-        // The visible row for this node (buildLibraryTree's winner), else any.
-        const tree = buildLibraryTree(rows, new Set([node.id]));
-        const findNote = (
-          items: readonly LibraryItem[],
-        ): LibraryRow | undefined => {
-          for (const item of items) {
-            if (item.kind === "note") return item.row;
-            const found = findNote(item.children);
-            if (found) return found;
-          }
-          return undefined;
-        };
-        const existing = findNote(tree);
-        const siblings = rowsInFolder(rows, folderId, existing?.id);
-        const rank = rankForDrop(
-          siblings,
-          input.position === "first" ? (siblings[0]?.id ?? null) : null,
+        // Every row filing this node moves (a second one, filed from a device
+        // that hadn't refetched, would otherwise keep showing it where it was).
+        const existing = rows.filter(
+          (r) => r.type === "note" && r.rootNodeId === node.id,
         );
-        const row: LibraryRow = existing
-          ? { ...existing, parentId: folderId, rank }
-          : {
-              id: libraryId("n"),
-              type: "note",
-              parentId: folderId,
-              rank,
-              rootNodeId: node.id,
-            };
-        yield* saveLibrary(store, [row]);
+        const moving = new Set(existing.map((r) => r.id));
+        const siblings = rowsInFolder(rows, folderId).filter(
+          (r) => !moving.has(r.id),
+        );
+        const next =
+          input.position === "first" ? (siblings[0]?.rank ?? null) : null;
+        let prev =
+          input.position === "first" ? null : (siblings.at(-1)?.rank ?? null);
+        const placed: LibraryRow[] = [];
+        for (const row of existing.length
+          ? existing
+          : [
+              {
+                id: libraryId("n"),
+                type: "note" as const,
+                parentId: folderId,
+                rank: "",
+                rootNodeId: node.id,
+              },
+            ]) {
+          const rank = rankBetween(prev, next);
+          placed.push({ ...row, parentId: folderId, rank });
+          prev = rank;
+        }
+        yield* saveLibrary(store, placed, records);
         const where =
           folderId === null
             ? "the top of the library"
             : `folder "${rows.find((r) => r.id === folderId)?.title ?? folderId}"`;
         return mcpReceipt(
-          `${existing ? "Moved" : "Filed"} note "${noteTitle(index, node.id)}" to ${where}.`,
+          `${existing.length ? "Moved" : "Filed"} note "${noteTitle(index, node.id)}" to ${where}.`,
         );
       }),
   },

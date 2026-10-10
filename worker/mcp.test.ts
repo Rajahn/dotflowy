@@ -61,6 +61,12 @@ function makeStore(
       return [];
     },
     getOrCreateKv: (collection, key, value) => {
+      if (collection === "library") {
+        // SAFETY: the library fake stores whatever row the tool claims; the tool decodes what comes back.
+        if (!library.has(key)) library.set(key, value);
+        // SAFETY: as above -- the stored library row, returned for the tool to decode.
+        return library.get(key) as typeof value;
+      }
       if (collection !== "daily-index")
         throw new Error(`unexpected kv collection ${collection}`);
       const existing = kv.get(key);
@@ -1157,5 +1163,67 @@ describe("MCP library tools", () => {
     expect(toolText(child)).toContain("not top-level");
     // The outline itself never changes.
     expect(fake.batches).toHaveLength(0);
+  });
+
+  test("move_note refuses the Daily container and moves every row filing a node", async () => {
+    const fake = makeStore(fixture(), [{ key: "container", nodeId: "b" }]);
+    const daily = await callTool(fake.store, "move_note", { nodeId: "b" });
+    expect(daily.result?.isError).toBe(true);
+    expect(toolText(daily)).toContain("Daily container");
+
+    // Two rows file node a (a device that hadn't refetched filed it again);
+    // one carries a field this version doesn't know.
+    fake.library.set("f1", {
+      id: "f1",
+      type: "folder",
+      parentId: null,
+      rank: "m",
+      title: "One",
+    });
+    fake.library.set("n1", {
+      id: "n1",
+      type: "note",
+      parentId: null,
+      rank: "a",
+      rootNodeId: "a",
+      color: "red",
+    });
+    fake.library.set("n2", {
+      id: "n2",
+      type: "note",
+      parentId: null,
+      rank: "b",
+      rootNodeId: "a",
+    });
+    await callTool(fake.store, "move_note", { nodeId: "a", folderId: "f1" });
+    const notes = rows(fake).filter((r) => r.rootNodeId === "a");
+    expect(notes.map((r) => r.parentId)).toEqual(["f1", "f1"]);
+    expect(fake.library.get("n1")).toMatchObject({ color: "red" });
+  });
+
+  test("create_note reuses an Agent folder drawn at the top even if its parent is gone, and never overwrites the fixed id", async () => {
+    const fake = makeStore(fixture());
+    fake.library.set("f_mine", {
+      id: "f_mine",
+      type: "folder",
+      parentId: "f_deleted",
+      rank: "m",
+      title: "Agent",
+    });
+    await callTool(fake.store, "create_note", { title: "Here" });
+    expect(rows(fake).find((r) => r.type === "note")?.parentId).toBe("f_mine");
+
+    const other = makeStore(fixture());
+    // A malformed row already holds the fixed id: the new folder takes another.
+    other.library.set("f_agent", {
+      id: "f_agent",
+      type: "folder",
+      title: null,
+    });
+    await callTool(other.store, "create_note", { title: "There" });
+    expect(other.library.get("f_agent")).toMatchObject({ title: null });
+    expect(rows(other).find((r) => r.type === "note")?.parentId).toBe(
+      "f_agent_2",
+    );
   });
 });
