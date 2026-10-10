@@ -372,6 +372,13 @@ export function useSelectionMode({
   // caret-first. Another pane mounting leaves a selection made elsewhere alone.
   useEffect(() => {
     if (selectionOwner === null || selectionOwner === paneId) clearSelection();
+    // The owner's editor going away (its tab or column closed) takes its
+    // selection with it, so the other panes' handlers aren't locked out.
+    return () => {
+      if (selectionOwner !== paneId) return;
+      selectionOwner = null;
+      clearSelection();
+    };
     // Mount-only: paneId is fixed for an editor.
     // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);

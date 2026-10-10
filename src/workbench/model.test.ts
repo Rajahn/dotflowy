@@ -341,6 +341,16 @@ test("a deep link reuses the untouched default tab, never a used one", () => {
     kind: "open",
     paneId: "a",
   });
+  // The bare start URL keeps a restored layout's active tab; with a filter it
+  // is a view like any other.
+  const restored = {
+    panes: [{ ...ONE_PANE.panes[0]!, tabs: [tab("t1", "N")] }],
+  };
+  expect(resolveUrlChange(restored, "a", view(null), "enter")).toBeUndefined();
+  expect(resolveUrlChange(restored, "a", view(null, "#x"), "enter")).toEqual({
+    kind: "open",
+    paneId: "a",
+  });
   // An empty pane opens a tab for any URL.
   const empty = { panes: [{ id: "a", tabs: [], activeTabId: null, width: 1 }] };
   expect(resolveUrlChange(empty, "a", view("X"), "back")).toEqual({

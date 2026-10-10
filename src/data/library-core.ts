@@ -253,14 +253,22 @@ export function rankForDrop(
 }
 
 /** The rows directly inside `folderId` (null = the library root), in rank
- *  order, minus `exceptId`. */
+ *  order, minus `exceptId`. A row whose folder is gone counts at the root,
+ *  where buildLibraryTree draws it, so ranks placed there respect it. */
 export function rowsInFolder(
   rows: readonly LibraryRow[],
   folderId: string | null,
   exceptId?: string,
 ): LibraryRow[] {
+  const folders = new Set(
+    rows.filter((r) => r.type === "folder").map((r) => r.id),
+  );
   return rows
-    .filter((r) => r.parentId === folderId && r.id !== exceptId)
+    .filter((r) => {
+      const parent =
+        r.parentId !== null && folders.has(r.parentId) ? r.parentId : null;
+      return parent === folderId && r.id !== exceptId;
+    })
     .sort(compareRank);
 }
 

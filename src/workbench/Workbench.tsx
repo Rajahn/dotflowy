@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 
+import { restoreHistory } from "../components/history-restore";
 import { OutlineEditor } from "../components/OutlineEditor";
 import { installLiteralPasteArm } from "../components/paste";
 import { getNodeActionBridge } from "../data/command-bridge";
@@ -36,7 +37,7 @@ import {
 } from "./dnd";
 import { useActivePaneId } from "./hooks";
 import { useWorkbenchLifecycle } from "./lifecycle";
-import { MobileLibraryDrawer } from "./MobileLibrary";
+import { MobileLibraryButton, MobileLibraryDrawer } from "./MobileLibrary";
 import {
   activeTabOf,
   MAX_PANES,
@@ -254,7 +255,19 @@ function EmptyPane({ paneId }: { paneId: string }) {
   const recent = useRecentRoots();
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-3 p-10 text-sm text-muted-foreground">
-      <p>Open a note from the sidebar.</p>
+      {/* Always a way out, also on a phone, where this replaces the header
+          (and with it the library button). */}
+      <div className="flex items-center gap-1">
+        <MobileLibraryButton />
+        <p>Open a note from the sidebar.</p>
+      </div>
+      <button
+        type="button"
+        className="self-start underline underline-offset-2 hover:text-foreground"
+        onClick={() => openInPane(paneId, null, { preview: false })}
+      >
+        Open the whole outline
+      </button>
       {recent.length > 0 && (
         <>
           <p className="text-xs font-medium">Recent</p>
@@ -712,12 +725,22 @@ function WorkbenchHost() {
 
   // Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z: undo/redo, owning history over the
   // browser's native contentEditable undo (preventDefault).
-  useHotkey("Mod+Z", () => dispatchPaneAction("undo"), {
-    preventDefault: true,
-  });
-  useHotkey("Mod+Shift+Z", () => dispatchPaneAction("redo"), {
-    preventDefault: true,
-  });
+  // An empty column has no editor to take them: the history still restores
+  // (a deleted note's tab closed, and undo is how it comes back).
+  useHotkey(
+    "Mod+Z",
+    () => {
+      if (!dispatchPaneAction("undo")) restoreHistory("undo");
+    },
+    { preventDefault: true },
+  );
+  useHotkey(
+    "Mod+Shift+Z",
+    () => {
+      if (!dispatchPaneAction("redo")) restoreHistory("redo");
+    },
+    { preventDefault: true },
+  );
   // Cmd/Ctrl+,: zoom the active pane out one level. Mirror of Cmd+. (zoom in).
   useHotkey("Mod+,", () => dispatchPaneAction("zoomOut"), {
     preventDefault: true,

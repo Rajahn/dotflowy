@@ -22,7 +22,8 @@ anywhere.
 
 ## Workbench (columns and tabs)
 
-Wide screens only. Every action is also in `Cmd/Ctrl+K`.
+Wide screens only. Every action except focusing a column by number is also
+in `Cmd/Ctrl+K` (focus left/right is there).
 
 | Key                                                     | Action                                                                 |
 | ------------------------------------------------------- | ---------------------------------------------------------------------- |

@@ -45,7 +45,9 @@ export function setHistoryLocationReader(reader: typeof readLocation): void {
 /** Told about every authoring capture (even a coalesced keystroke), with the
  *  location the caller supplied, if any. The workbench pins a preview tab on
  *  its first write (docs/workbench/PLAN.md 1.3). */
-let captureListener: ((location: HistoryLocation | null) => void) | null = null;
+let captureListener:
+  | ((location: HistoryLocation | null, placed: boolean) => void)
+  | null = null;
 export function setCaptureListener(listener: typeof captureListener): void {
   captureListener = listener;
 }
@@ -243,7 +245,13 @@ export function capture(
   // The location the edit happened at, as the entry records it: a write the
   // caller didn't place (most of them) is read from the focused row.
   const location = options.location ?? readLocation?.(focusId) ?? null;
-  captureListener?.(location);
+  // `placed`: the edit has a place -- the caller named it, or a row had the
+  // caret. A write from outside any row (a sidebar action) borrows the last
+  // place for undo, but that place didn't receive the write.
+  captureListener?.(
+    location,
+    options.location !== undefined || focusId !== null,
+  );
 
   const top = undoStack[undoStack.length - 1];
   if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;

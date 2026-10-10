@@ -33,7 +33,11 @@ import {
   ResponsiveMenuItem,
   ResponsiveMenuTrigger,
 } from "../components/ui/responsive-menu";
-import { getNodeActionBridge } from "../data/command-bridge";
+import {
+  getAnyNodeActionBridge,
+  getNodeActionBridge,
+  type NodeActionBridge,
+} from "../data/command-bridge";
 import { capture } from "../data/history";
 import {
   createFolder,
@@ -297,6 +301,10 @@ function FolderItem(
       toast("Move or delete the notes in this folder first.");
       return;
     }
+    // Its hidden rows (notes whose node is gone or nested, kept so an undo
+    // brings them back) move up a level instead of pointing at nothing.
+    for (const row of rows)
+      if (row.parentId === id) moveLibraryRow(row.id, props.parentId, null);
     deleteLibraryRow(id);
     if (props.currentFolder === id) props.onSelectFolder(null);
   };
@@ -829,17 +837,36 @@ function createNote(folderId: string | null): string | null {
   return nodeId;
 }
 
+/** Run `act` through an editor's command funnel: the active column's, else
+ *  any column's. With no editor mounted at all (one empty column), open the
+ *  note there first and act once its editor is up. */
+function withEditor(nodeId: string, act: (bridge: NodeActionBridge) => void) {
+  const bridge = getNodeActionBridge() ?? getAnyNodeActionBridge();
+  if (bridge) {
+    act(bridge);
+    return;
+  }
+  openInPane(getActivePaneId(), nodeId, { preview: false });
+  let frames = 60;
+  const wait = () => {
+    const mounted = getNodeActionBridge();
+    if (mounted) act(mounted);
+    else if (frames-- > 0) requestAnimationFrame(wait);
+  };
+  requestAnimationFrame(wait);
+}
+
 /** Rename a note = edit its root node's text, through the editor's command
  *  funnel (lock guard, text history). */
 function renameNote(nodeId: string, text: string) {
-  getNodeActionBridge()?.commands.onTextChange(nodeId, text.trim());
+  withEditor(nodeId, (b) => b.commands.onTextChange(nodeId, text.trim()));
 }
 
 /** Delete a note = delete its root node's subtree, through the editor's delete
  *  funnel (protection and lock guards, the big-subtree confirm, undo). Tabs
  *  showing the note or anything inside it close (lifecycle.ts). */
 function deleteNote(nodeId: string) {
-  getNodeActionBridge()?.commands.onDeleteNode(nodeId);
+  withEditor(nodeId, (b) => b.commands.onDeleteNode(nodeId));
 }
 
 // --- collapsed folders (per device) ------------------------------------------

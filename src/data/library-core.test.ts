@@ -8,6 +8,7 @@ import {
   isFolderWithin,
   rankBetween,
   rankForDrop,
+  rowsInFolder,
   unfiledNodeIds,
   type LibraryItem,
   type LibraryRow,
@@ -153,4 +154,13 @@ test("agentFolderPlan leaves a renamed folder its fixed id and takes another", (
     id: `${AGENT_FOLDER_ID}_2`,
     create: true,
   });
+});
+
+test("rowsInFolder counts a row whose folder is gone at the root", () => {
+  const rows: LibraryRow[] = [
+    { id: "n1", type: "note", parentId: null, rank: "a", rootNodeId: "x" },
+    { id: "n2", type: "note", parentId: "gone", rank: "m", rootNodeId: "y" },
+  ];
+  expect(rowsInFolder(rows, null).map((r) => r.id)).toEqual(["n1", "n2"]);
+  expect(rowsInFolder(rows, "gone")).toEqual([]);
 });

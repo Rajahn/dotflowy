@@ -16,7 +16,9 @@ See [ADR 0043](./0043-spoilers-redacted-from-agents.md).
 
 The CLI calls the existing MCP endpoint, preserving server validation, limits,
 and the paid-plan requirement for tool calls. Friendly commands cover every
-current tool. A generic `call` command accepts exact MCP tool names and arguments;
+outline tool; the library tools added with the workbench (`list_library`,
+`create_folder`, `create_note`, `move_note`, ADR 0070) are reached through
+`call` until the CLI gains commands for them. A generic `call` command accepts exact MCP tool names and arguments;
 tool discovery exposes server schemas so new tools remain callable without a CLI
 release. No duplicate outline API or local mutation implementation is introduced.
 

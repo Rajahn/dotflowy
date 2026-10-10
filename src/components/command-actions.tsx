@@ -41,10 +41,11 @@ import { useTree } from "../data/useTree";
 import { useIsMobile } from "../hooks/use-mobile";
 import { signOutAndReload } from "../lib/auth-client";
 import { moveToAdjacentColumn } from "../workbench/column-move-action";
-import { useActivePaneRootId } from "../workbench/hooks";
+import { useActivePaneId, useActivePaneRootId } from "../workbench/hooks";
 import { MAX_PANES } from "../workbench/model";
 import {
   closeActiveTab,
+  cycleTab,
   focusAdjacentPane,
   pinActiveTab,
   splitActivePane,
@@ -92,7 +93,12 @@ export function useGlobalActions(opts: {
   const { index } = useTree();
   // The active pane's zoom root: Cmd+K acts on the pane that had focus.
   const rootId = useActivePaneRootId();
-  const paneCount = useWorkbenchState().panes.length;
+  const workbench = useWorkbenchState();
+  const paneCount = workbench.panes.length;
+  // Tab cycling needs a second tab in the active column.
+  const activePaneId = useActivePaneId();
+  const hasTabs =
+    (workbench.panes.find((p) => p.id === activePaneId)?.tabs.length ?? 0) > 1;
   // A phone shows one column (PLAN 1.9): no splitting, no column moves.
   const narrow = useIsMobile();
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
@@ -218,7 +224,8 @@ export function useGlobalActions(opts: {
         run: () => openFilterInput(),
       },
       // Workbench layout (docs/workbench/PLAN.md 1.3, 1.5). Every shortcut
-      // also lives here, so a chord is never the only way in.
+      // but focus-column-by-number (focus left/right covers it) also lives
+      // here, so a chord is never the only way in.
       {
         id: "g:split",
         label: "Split right",
@@ -250,6 +257,28 @@ export function useGlobalActions(opts: {
         scope: "global",
         keywords: ["pin", "keep", "preview", "tab"],
         run: () => pinActiveTab(),
+      },
+      {
+        id: "g:tab-next",
+        label: "Next tab",
+        description: "Show the next tab in this column",
+        icon: ArrowRightToLineIcon,
+        scope: "global",
+        keywords: ["tab", "next", "cycle"],
+        hotkey: ["⌥", "]"],
+        disabled: !hasTabs,
+        run: () => cycleTab(1),
+      },
+      {
+        id: "g:tab-prev",
+        label: "Previous tab",
+        description: "Show the previous tab in this column",
+        icon: ArrowLeftToLineIcon,
+        scope: "global",
+        keywords: ["tab", "previous", "cycle"],
+        hotkey: ["⌥", "["],
+        disabled: !hasTabs,
+        run: () => cycleTab(-1),
       },
       {
         id: "g:pane-left",
@@ -439,6 +468,7 @@ export function useGlobalActions(opts: {
     openConnect,
     daily,
     paneCount,
+    hasTabs,
     narrow,
   ]);
 }

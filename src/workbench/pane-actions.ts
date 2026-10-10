@@ -37,7 +37,9 @@ export function getPaneActions(paneId: string): PaneActions | null {
 }
 
 /** Run one window chord's action on the ACTIVE pane only. The host's hotkeys
- *  call this; a pane with no mounted editor is a no-op. */
-export function dispatchPaneAction(kind: keyof PaneActions): void {
-  getPaneActions(getActivePaneId())?.[kind]();
+ *  call this. False when that pane has no mounted editor (an empty column). */
+export function dispatchPaneAction(kind: keyof PaneActions): boolean {
+  const run = getPaneActions(getActivePaneId())?.[kind];
+  run?.();
+  return run !== undefined;
 }
