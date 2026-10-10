@@ -1,13 +1,30 @@
 // Pure logic for the library: the sidebar's folders and notes
-// (docs/workbench/PLAN.md 1.2, 2.5). Dependency-free on purpose -- the
-// `saved-queries-core.ts` discipline: no collection imports, no DOM, so it stays
-// bun-testable. The collection + reactive reads live in `library.ts`.
+// (docs/workbench/PLAN.md 1.2, 2.5). The `saved-queries-core.ts` discipline:
+// no collection imports, no DOM (only Effect Schema, for the row decoder), so
+// it stays bun-testable. The collection + reactive reads live in `library.ts`.
 //
 // A NOTE is an ordinary top-level outline node (`parentId === null`) that the
 // library has registered under a folder; its title is that node's text, read
 // live, so a note never stores a second copy of its name. A FOLDER exists only
 // in the library and only groups notes. Every top-level node no visible note
 // row points at is UNFILED.
+//
+// The worker's MCP library tools (worker/mcp-tools.ts) share this module, so
+// the row schema lives here: one decoder for the client collection and the
+// agent's writes.
+
+import { Schema } from "effect";
+
+/** The stored row, decoded at both ends (the client collection, MCP). Typed
+ *  against {@link LibraryRow}, so the two can't drift apart. */
+export const LibraryRowSchema: Schema.Codec<LibraryRow> = Schema.Struct({
+  id: Schema.String,
+  type: Schema.Literals(["folder", "note"]),
+  parentId: Schema.NullOr(Schema.String),
+  rank: Schema.String,
+  title: Schema.optional(Schema.String),
+  rootNodeId: Schema.optional(Schema.String),
+});
 
 /** One library row, stored as a kv side-collection item. */
 export interface LibraryRow {
@@ -233,4 +250,54 @@ export function rankForDrop(
       : siblings.findIndex((r) => r.id === beforeId);
   const at = i < 0 ? siblings.length : i;
   return rankBetween(siblings[at - 1]?.rank, siblings[at]?.rank);
+}
+
+/** The rows directly inside `folderId` (null = the library root), in rank
+ *  order, minus `exceptId`. */
+export function rowsInFolder(
+  rows: readonly LibraryRow[],
+  folderId: string | null,
+  exceptId?: string,
+): LibraryRow[] {
+  return rows
+    .filter((r) => r.parentId === folderId && r.id !== exceptId)
+    .sort(compareRank);
+}
+
+// --- The Agent folder ---------------------------------------------------------
+
+/** The name of the folder agents file their new notes in (PLAN 1.10). */
+export const AGENT_FOLDER_TITLE = "Agent";
+/** The id the Agent folder gets when an agent creates it: fixed, so two agent
+ *  writes racing to create it write the same row instead of two folders. */
+export const AGENT_FOLDER_ID = "f_agent";
+
+export interface AgentFolderPlan {
+  id: string;
+  /** The folder doesn't exist yet: write it with the note. */
+  create: boolean;
+}
+
+/**
+ * Where an agent's new note goes: the first folder named "Agent" (any case)
+ * drawn at the top of the library, else a new one -- under the fixed id,
+ * unless a row already holds that id (`taken` also counts stored rows that
+ * didn't decode).
+ */
+export function agentFolderPlan(
+  rows: readonly LibraryRow[],
+  taken: ReadonlySet<string> = new Set(),
+): AgentFolderPlan {
+  // Drawn at the top: a folder whose parent is gone, or caught in a cycle,
+  // shows there too (buildLibraryTree).
+  const existing = buildLibraryTree(rows, new Set()).find(
+    (item) =>
+      item.kind === "folder" &&
+      item.row.title?.trim().toLowerCase() === AGENT_FOLDER_TITLE.toLowerCase(),
+  );
+  if (existing) return { id: existing.row.id, create: false };
+  const ids = new Set([...taken, ...rows.map((r) => r.id)]);
+  let id = AGENT_FOLDER_ID;
+  for (let n = 2; ids.has(id); n++) id = `${AGENT_FOLDER_ID}_${n}`;
+  return { id, create: true };
 }

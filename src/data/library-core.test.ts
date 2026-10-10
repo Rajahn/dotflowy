@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 
 import {
+  AGENT_FOLDER_ID,
+  agentFolderPlan,
   buildLibraryTree,
   canDeleteFolder,
   isFolderWithin,
@@ -127,4 +129,28 @@ test("rankBetween lands right after a tied or out-of-order neighbour, and treats
   expect(swapped < "s").toBe(true);
   expect(rankBetween("", "")).toBe(rankBetween(null, null));
   expect(rankBetween("i", "")).toBe(rankBetween("i", null));
+});
+
+const named = (id: string, title: string, parentId: string | null = null) =>
+  ({ id, type: "folder", parentId, rank: "m", title }) satisfies LibraryRow;
+
+test("agentFolderPlan reuses a top-level folder named Agent in any case, else claims the fixed id", () => {
+  expect(agentFolderPlan([])).toEqual({ id: AGENT_FOLDER_ID, create: true });
+  expect(agentFolderPlan([named("f1", " agent ")])).toEqual({
+    id: "f1",
+    create: false,
+  });
+  // A nested "Agent" folder doesn't count; one whose parent is gone is drawn
+  // at the top, so it does.
+  expect(
+    agentFolderPlan([named("f0", "Work"), named("f1", "Agent", "f0")]).create,
+  ).toBe(true);
+  expect(agentFolderPlan([named("f1", "Agent", "gone")]).id).toBe("f1");
+});
+
+test("agentFolderPlan leaves a renamed folder its fixed id and takes another", () => {
+  expect(agentFolderPlan([named(AGENT_FOLDER_ID, "Research")])).toEqual({
+    id: `${AGENT_FOLDER_ID}_2`,
+    create: true,
+  });
 });

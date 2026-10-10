@@ -52,7 +52,8 @@ const SERVER_INSTRUCTIONS =
   'Dotflowy is the user\'s personal outline (nested bullets; some are to-dos; daily notes live under a "Daily" container). ' +
   "Read with get_outline / search_nodes — every line carries the node id the write tools need. " +
   "add_to_today and mirror_to_today are the fastest ways to put something on the user's daily note; " +
-  'pass `timeZone` (e.g. "America/New_York") so an omitted `date` resolves to the user\'s own today.';
+  'pass `timeZone` (e.g. "America/New_York") so an omitted `date` resolves to the user\'s own today. ' +
+  'The app\'s sidebar files top-level nodes as notes in folders: list_library reads it, and create_note files new notes in the "Agent" folder by default.';
 
 // JSON-RPC 2.0 error codes.
 const PARSE_ERROR = -32700;

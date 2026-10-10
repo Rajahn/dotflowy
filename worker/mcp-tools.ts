@@ -27,6 +27,18 @@ import {
   scaffoldLabel,
   type WeekStart,
 } from "../src/data/date-links";
+import {
+  AGENT_FOLDER_TITLE,
+  agentFolderPlan,
+  buildLibraryTree,
+  type LibraryItem,
+  type LibraryRow,
+  LibraryRowSchema,
+  rankBetween,
+  rankForDrop,
+  rowsInFolder,
+  unfiledNodeIds,
+} from "../src/data/library-core";
 import { exportOpml } from "../src/data/opml-export";
 import {
   OPML_MCP_MAX_NODES,
@@ -79,11 +91,18 @@ export interface OutlineStore {
     expectedWeekStart?: WeekStart,
   ): number | Promise<number>;
   getKv(collection: string): unknown[] | Promise<unknown[]>;
+  /** Atomic get-or-create on one kv key: the stored value wins. The DO stores
+   *  any JSON row; callers decode what comes back. */
   getOrCreateKv(
     collection: string,
     key: string,
-    value: KvClaim,
-  ): KvClaim | Promise<KvClaim>;
+    value: KvClaim | LibraryRow,
+  ): KvClaim | LibraryRow | Promise<KvClaim | LibraryRow>;
+  /** Insert or replace kv rows (the library tools write folders and notes). */
+  upsertKv(
+    collection: string,
+    rows: readonly { key: string; value: unknown }[],
+  ): void | Promise<void>;
   migrateWeekStart?(
     weekStart: WeekStart,
     limit: number | null,
@@ -758,6 +777,54 @@ const ExportOpmlInput = Schema.Struct({
 
 // --- The tools ----------------------------------------------------------------
 
+const ListLibraryInput = Schema.Struct({});
+
+const CreateFolderInput = Schema.Struct({
+  title: Schema.String.annotate({ description: "The folder's name." }),
+  parentFolderId: optional(
+    Schema.String.annotate({
+      description:
+        "Folder to create it inside (an id from list_library). Omit for the top of the library.",
+    }),
+  ),
+});
+
+const CreateNoteInput = Schema.Struct({
+  title: Schema.String.annotate({
+    description: "The note's title: the text of its top-level bullet.",
+  }),
+  folderId: optional(
+    Schema.String.annotate({
+      description:
+        'Folder to file the note in (an id from list_library). Omit to file it in the "Agent" folder, which is created if missing.',
+    }),
+  ),
+  children: optional(
+    Schema.Array(SubtreeNodeInput).annotate({
+      description:
+        "The note's initial content: a nested forest of bullets under the title, the same shape as add_subtree's `nodes`.",
+    }),
+  ),
+});
+
+const MoveNoteInput = Schema.Struct({
+  nodeId: Schema.String.annotate({
+    description:
+      "The note's top-level node id (from list_library or get_outline). An unfiled top-level node is filed as a new note.",
+  }),
+  folderId: optional(
+    Schema.String.annotate({
+      description:
+        "Destination folder id. Omit or null for the top of the library.",
+    }),
+  ),
+  position: optional(
+    Schema.Literals(["first", "last"]).annotate({
+      description: "First or last in the folder (default: last).",
+    }),
+  ),
+});
+
 const MAX_OUTLINE_NODES = 500;
 /** One `add_subtree` batch = one DO `transactionSync` = one sync frame; cap the
  *  forest at the same ceiling an agent hits reading back (ADR 0028). */
@@ -862,6 +929,144 @@ const renderImportReceipt = (args: {
   }
   return lines.join("\n");
 };
+
+// --- Library (docs/workbench/PLAN.md 1.10, 2.9) ---------------------------------
+// The sidebar's folders and notes are the `library` kv side-collection; a note
+// is a top-level node the library files under a folder. kv writes don't push
+// over the sync socket, so an open editor picks them up on its next refetch
+// (window focus); the nodes themselves arrive live as usual.
+
+const KV_LIBRARY = "library";
+/** Cap on the unfiled listing, so a big legacy outline stays a compact read. */
+const MAX_UNFILED_LISTED = 100;
+
+/** Run a kv store call through the typed error channel. */
+const kvCall = <A>(run: () => A | Promise<A>): Effect.Effect<A, ToolError> =>
+  Effect.tryPromise({
+    try: async () => run(),
+    // SAFETY: Effect's catch hands us the untyped rejection; Error messages carry the real diagnostics (e.g. the shard's SQLite error), anything else stringifies.
+    catch: (error) =>
+      error instanceof Error
+        ? toolErrorFrom(error)
+        : new ToolError({ reason: String(error) }),
+  });
+
+/** The library as stored: its well-formed rows (a malformed one, an older or
+ *  foreign write, is skipped, as the client collection's schema would reject
+ *  it), each row's full stored record (a write keeps fields this version
+ *  doesn't know), and every stored id, malformed rows included. */
+const StoredRecord = Schema.Record(Schema.String, Schema.Json);
+type StoredRecord = typeof StoredRecord.Type;
+
+interface StoredLibrary {
+  rows: LibraryRow[];
+  records: ReadonlyMap<string, StoredRecord>;
+  ids: ReadonlySet<string>;
+}
+
+const loadLibrary = (
+  store: OutlineStore,
+): Effect.Effect<StoredLibrary, ToolError> =>
+  Effect.map(
+    kvCall(() => store.getKv(KV_LIBRARY)),
+    (raw) => {
+      const rows: LibraryRow[] = [];
+      const records = new Map<string, StoredRecord>();
+      const ids = new Set<string>();
+      for (const value of raw) {
+        const record = Schema.decodeUnknownOption(StoredRecord)(value);
+        const row = Schema.decodeUnknownOption(LibraryRowSchema)(value);
+        if (record._tag === "Some" && Object.hasOwn(record.value, "id"))
+          ids.add(String(record.value["id"]));
+        if (row._tag === "None" || record._tag === "None") continue;
+        rows.push(row.value);
+        records.set(row.value.id, record.value);
+      }
+      return { rows, records, ids };
+    },
+  );
+
+const saveLibrary = (
+  store: OutlineStore,
+  rows: readonly LibraryRow[],
+  records: StoredLibrary["records"] = new Map(),
+): Effect.Effect<void, ToolError> =>
+  kvCall(() =>
+    store.upsertKv(
+      KV_LIBRARY,
+      rows.map((row) => ({
+        key: row.id,
+        value: { ...records.get(row.id), ...row },
+      })),
+    ),
+  );
+
+const libraryId = (prefix: "f" | "n"): string => `${prefix}_${createId()}`;
+
+/** A top-level node's title as an agent reads it. */
+const noteTitle = (index: TreeIndex, nodeId: string): string =>
+  redactSpoilers(index.byId.get(nodeId)?.text.trim() || "Untitled");
+
+/** The Agent folder's id, creating it if needed -- through the DO's atomic
+ *  get-or-create, so two agent calls racing to create it make one folder and
+ *  neither overwrites a folder that appeared (or was renamed) meanwhile. */
+const claimAgentFolder = (
+  store: OutlineStore,
+  library: StoredLibrary,
+): Effect.Effect<{ id: string; title: string | undefined }, ToolError> =>
+  Effect.gen(function* () {
+    const plan = agentFolderPlan(library.rows, library.ids);
+    if (!plan.create) return { id: plan.id, title: AGENT_FOLDER_TITLE };
+    const folder: LibraryRow = {
+      id: plan.id,
+      type: "folder",
+      parentId: null,
+      rank: rankForDrop(rowsInFolder(library.rows, null), null),
+      title: AGENT_FOLDER_TITLE,
+    };
+    const stored = yield* kvCall(() =>
+      store.getOrCreateKv(KV_LIBRARY, plan.id, folder),
+    );
+    const row = Schema.decodeUnknownOption(LibraryRowSchema)(stored);
+    if (row._tag === "None" || row.value.type !== "folder")
+      return yield* Effect.fail(
+        new ToolError({ reason: `library row "${plan.id}" is not a folder` }),
+      );
+    return { id: row.value.id, title: row.value.title };
+  });
+
+/** A folder id the caller passed must name a folder. */
+const requireFolder = (
+  rows: readonly LibraryRow[],
+  folderId: string,
+): Effect.Effect<LibraryRow, ToolError> => {
+  const row = rows.find((r) => r.id === folderId);
+  return row?.type === "folder"
+    ? Effect.succeed(row)
+    : Effect.fail(
+        new ToolError({
+          reason: `no folder with id "${folderId}" — list_library shows the folder ids`,
+        }),
+      );
+};
+
+/** The library tree as indented lines with ids. */
+const renderLibrary = (
+  items: readonly LibraryItem[],
+  index: TreeIndex,
+  depth = 0,
+): string[] =>
+  items.flatMap((item) => {
+    const pad = "  ".repeat(depth);
+    if (item.kind === "note")
+      return [
+        `${pad}- ${noteTitle(index, item.rootNodeId)} (note; node id: ${item.rootNodeId})`,
+      ];
+    return [
+      `${pad}- [folder] ${redactSpoilers(item.row.title?.trim() || "Untitled folder")} (folder id: ${item.row.id})`,
+      ...renderLibrary(item.children, index, depth + 1),
+    ];
+  });
 
 export const tools: ReadonlyArray<ToolDef> = [
   {
@@ -1405,6 +1610,218 @@ export const tools: ReadonlyArray<ToolDef> = [
           ? redactSpoilers(rootNode.text)
           : "dotflowy";
         return exportOpml(redactSpoilerIndex(index), rootId, { title });
+      }),
+  },
+  {
+    name: "list_library",
+    description:
+      "List the user's library: the folders and notes in the app's sidebar, with folder ids and each note's top-level node id (read a note with get_outline on that id), followed by the top-level nodes not filed in any folder.",
+    input: ListLibraryInput,
+    readOnly: true,
+    handle: (_input: typeof ListLibraryInput.Type, store) =>
+      Effect.gen(function* () {
+        const [index, { rows }, daily] = yield* Effect.all(
+          [loadIndex(store), loadLibrary(store), loadDailyReverseMap(store)],
+          { concurrency: "unbounded" },
+        );
+        const topLevel = childrenOf(index, null).map((n) => n.id);
+        const tree = buildLibraryTree(rows, new Set(topLevel));
+        const container = [...daily].find(([, key]) => key === CONTAINER_KEY);
+        const unfiled = unfiledNodeIds(
+          topLevel,
+          tree,
+          new Set(container ? [container[0]] : []),
+        );
+        const lines = renderLibrary(tree, index);
+        const unfiledLines = unfiled
+          .slice(0, MAX_UNFILED_LISTED)
+          .map((id) => `- ${noteTitle(index, id)} (node id: ${id})`);
+        const more =
+          unfiled.length > MAX_UNFILED_LISTED
+            ? [`(and ${unfiled.length - MAX_UNFILED_LISTED} more)`]
+            : [];
+        return [
+          lines.length
+            ? lines.join("\n")
+            : "The library has no folders or notes yet.",
+          "",
+          unfiled.length
+            ? `Unfiled top-level nodes (${unfiled.length}):\n${[...unfiledLines, ...more].join("\n")}`
+            : "Every top-level node is filed.",
+        ].join("\n");
+      }),
+  },
+  {
+    name: "create_folder",
+    description:
+      "Create a folder in the user's library (the app's sidebar), at the end of the library or of another folder. Returns the folder id.",
+    input: CreateFolderInput,
+    readOnly: false,
+    handle: (input: typeof CreateFolderInput.Type, store) =>
+      Effect.gen(function* () {
+        const title = input.title.trim();
+        if (!title)
+          return yield* Effect.fail(
+            new ToolError({ reason: "the folder needs a title" }),
+          );
+        const { rows } = yield* loadLibrary(store);
+        const parentId = input.parentFolderId ?? null;
+        if (parentId !== null) yield* requireFolder(rows, parentId);
+        const folder: LibraryRow = {
+          id: libraryId("f"),
+          type: "folder",
+          parentId,
+          rank: rankForDrop(rowsInFolder(rows, parentId), null),
+          title,
+        };
+        yield* saveLibrary(store, [folder]);
+        return mcpReceipt(
+          `Created folder "${title}" (folder id: ${folder.id}).`,
+        );
+      }),
+  },
+  {
+    name: "create_note",
+    description:
+      'Create a note: a new top-level bullet titled `title`, optionally with a nested outline under it, filed in a library folder — by default the "Agent" folder, where the user expects agent-made notes. Returns the note\'s node id and the created bullets.',
+    input: CreateNoteInput,
+    readOnly: false,
+    handle: (input: typeof CreateNoteInput.Type, store, origin) =>
+      Effect.gen(function* () {
+        const title = input.title.trim();
+        if (!title)
+          return yield* Effect.fail(
+            new ToolError({ reason: "the note needs a title" }),
+          );
+        // Resolve the folder BEFORE writing any node, so a bad folder id
+        // leaves nothing behind.
+        const [library, index] = yield* Effect.all(
+          [loadLibrary(store), loadIndex(store)],
+          { concurrency: "unbounded" },
+        );
+        const { rows } = library;
+        if (input.folderId != null) yield* requireFolder(rows, input.folderId);
+        const timestamp = yield* clock;
+        const plan = yield* unwrap(
+          planAddSubtree(index, {
+            nodes: [{ text: title, children: input.children ?? [] }],
+            parentId: null,
+            position: "last",
+            origin,
+            timestamp,
+            newId: createId,
+            maxNodes: MAX_BATCH_NODES,
+          }),
+        );
+        yield* commit(store, plan.ops);
+        const nodeId = plan.rootIds[0]!;
+
+        // Not atomic with the node write (kv and nodes are separate stores): if
+        // filing fails, the note still exists, unfiled, and the error says so.
+        const filed = Effect.gen(function* () {
+          const folder =
+            input.folderId != null
+              ? { id: input.folderId, title: undefined }
+              : yield* claimAgentFolder(store, library);
+          yield* saveLibrary(store, [
+            {
+              id: libraryId("n"),
+              type: "note",
+              parentId: folder.id,
+              rank: rankForDrop(rowsInFolder(rows, folder.id), null),
+              rootNodeId: nodeId,
+            },
+          ]);
+          return folder;
+        }).pipe(
+          Effect.mapError(
+            (e) =>
+              new ToolError({
+                reason: `created the note (node id: ${nodeId}) but could not file it: ${e.reason}`,
+              }),
+          ),
+        );
+        const folder = yield* filed;
+        const folderName = redactSpoilers(
+          folder.title ??
+            rows.find((r) => r.id === folder.id)?.title ??
+            folder.id,
+        );
+        return mcpReceipt(
+          `Created note "${title}" (node id: ${nodeId}) in folder "${folderName}":\n${renderCreatedForest(plan.ops, plan.rootIds)}`,
+        );
+      }),
+  },
+  {
+    name: "move_note",
+    description:
+      "Move a note to another library folder, or to the top of the library. Passing an unfiled top-level node files it as a note. Only the sidebar changes; the outline itself is untouched.",
+    input: MoveNoteInput,
+    readOnly: false,
+    handle: (input: typeof MoveNoteInput.Type, store) =>
+      Effect.gen(function* () {
+        const [index, library, daily] = yield* Effect.all(
+          [loadIndex(store), loadLibrary(store), loadDailyReverseMap(store)],
+          { concurrency: "unbounded" },
+        );
+        const node = index.byId.get(input.nodeId);
+        if (!node)
+          return yield* Effect.fail(
+            new ToolError({ reason: `no node with id "${input.nodeId}"` }),
+          );
+        if (node.parentId !== null)
+          return yield* Effect.fail(
+            new ToolError({
+              reason: `node "${input.nodeId}" is not top-level, and only top-level nodes are notes — move it to the top level with move_nodes first`,
+            }),
+          );
+        if (daily.get(node.id) === CONTAINER_KEY)
+          return yield* Effect.fail(
+            new ToolError({
+              reason:
+                "the Daily container has its own sidebar entry and can't be filed in a folder",
+            }),
+          );
+        const { rows, records } = library;
+        const folderId = input.folderId ?? null;
+        if (folderId !== null) yield* requireFolder(rows, folderId);
+        // Every row filing this node moves (a second one, filed from a device
+        // that hadn't refetched, would otherwise keep showing it where it was).
+        const existing = rows.filter(
+          (r) => r.type === "note" && r.rootNodeId === node.id,
+        );
+        const moving = new Set(existing.map((r) => r.id));
+        const siblings = rowsInFolder(rows, folderId).filter(
+          (r) => !moving.has(r.id),
+        );
+        const next =
+          input.position === "first" ? (siblings[0]?.rank ?? null) : null;
+        let prev =
+          input.position === "first" ? null : (siblings.at(-1)?.rank ?? null);
+        const placed: LibraryRow[] = [];
+        for (const row of existing.length
+          ? existing
+          : [
+              {
+                id: libraryId("n"),
+                type: "note" as const,
+                parentId: folderId,
+                rank: "",
+                rootNodeId: node.id,
+              },
+            ]) {
+          const rank = rankBetween(prev, next);
+          placed.push({ ...row, parentId: folderId, rank });
+          prev = rank;
+        }
+        yield* saveLibrary(store, placed, records);
+        const where =
+          folderId === null
+            ? "the top of the library"
+            : `folder "${redactSpoilers(rows.find((r) => r.id === folderId)?.title ?? folderId)}"`;
+        return mcpReceipt(
+          `${existing.length ? "Moved" : "Filed"} note "${noteTitle(index, node.id)}" to ${where}.`,
+        );
       }),
   },
 ];

@@ -50,3 +50,14 @@ a node at all.
 - The library is reconciled on focus, not pushed live: a root an agent creates
   appears under Unfiled at once (node sync is live) and moves to its folder when
   the library refetches.
+
+## Agents (added with the MCP library tools)
+
+- **Agent notes go to an "Agent" folder** (`docs/mcp.md`): `create_note` files
+  there unless told otherwise, reusing a top-level folder the person named
+  "Agent" and otherwise creating one under a fixed id, so two racing agent
+  calls make one folder.
+- **No polling.** The library's existing refetch on window focus is the
+  reconciliation; a person switching back to the app is exactly when an
+  agent's filing needs to show. A push channel for kv rows would be a sync
+  protocol change, out of scope for an additive feature.

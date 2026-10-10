@@ -25,6 +25,8 @@ interface FakeStore {
   store: OutlineStore;
   nodes: Map<string, Node>;
   kv: Map<string, { key: string; nodeId: string }>;
+  /** The `library` kv collection, by row key. */
+  library: Map<string, unknown>;
   batches: ChangeOp[][];
   expectedWeekStarts: Array<"sunday" | "monday" | undefined>;
 }
@@ -37,6 +39,7 @@ function makeStore(
   const nodes = new Map(seed.map((n) => [n.id, n]));
   const kv = new Map(kvRows.map((r) => [r.key, r]));
   const batches: ChangeOp[][] = [];
+  const library = new Map<string, unknown>();
   const expectedWeekStarts: Array<"sunday" | "monday" | undefined> = [];
   const store: OutlineStore = {
     getNodes: () => [...nodes.values()],
@@ -51,12 +54,19 @@ function makeStore(
     },
     getKv: (collection) => {
       if (collection === "daily-index") return [...kv.values()];
+      if (collection === "library") return [...library.values()];
       if (collection === "account-prefs" && weekStart) {
         return [{ key: "daily:week-start", weekStart }];
       }
       return [];
     },
     getOrCreateKv: (collection, key, value) => {
+      if (collection === "library") {
+        // SAFETY: the library fake stores whatever row the tool claims; the tool decodes what comes back.
+        if (!library.has(key)) library.set(key, value);
+        // SAFETY: as above -- the stored library row, returned for the tool to decode.
+        return library.get(key) as typeof value;
+      }
       if (collection !== "daily-index")
         throw new Error(`unexpected kv collection ${collection}`);
       const existing = kv.get(key);
@@ -65,12 +75,17 @@ function makeStore(
       kv.set(key, value as { key: string; nodeId: string });
       return value;
     },
+    upsertKv: (collection, rows) => {
+      if (collection !== "library")
+        throw new Error(`unexpected kv collection ${collection}`);
+      for (const row of rows) library.set(row.key, row.value);
+    },
     canonicalizeWeekStart: () => ({
       weekStart: weekStart ?? "monday",
       seq: batches.length,
     }),
   };
-  return { store, nodes, kv, batches, expectedWeekStarts };
+  return { store, nodes, kv, library, batches, expectedWeekStarts };
 }
 
 // --- Request plumbing -----------------------------------------------------------
@@ -966,9 +981,249 @@ describe("MCP tools", () => {
       applyBatch: () => 0,
       getKv: () => [],
       getOrCreateKv: () => ({ key: "", nodeId: "" }),
+      upsertKv: () => {},
     };
     const json = await callTool(broken, "get_outline", {});
     expect(json.result?.isError).toBe(true);
     expect(toolText(json)).toContain("too many terms in compound SELECT");
+  });
+});
+
+// --- Library tools (docs/workbench/PLAN.md 1.10, 2.9) ----------------------------
+
+describe("MCP library tools", () => {
+  /** The library rows the fake holds, decoded loosely for assertions. */
+  function rows(fake: FakeStore) {
+    // SAFETY: the library tools only ever write LibraryRow values; the expects below check the fields.
+    return [...fake.library.values()] as Array<{
+      id: string;
+      type: "folder" | "note";
+      parentId: string | null;
+      rank: string;
+      title?: string;
+      rootNodeId?: string;
+    }>;
+  }
+
+  test("tools/list publishes the registry in order, library tools last", async () => {
+    const { store } = makeStore();
+    const res = await rpc(store, "tools/list");
+    // SAFETY: parsed from our own handleMcp's tools/list result; names checked below.
+    const json = (await res.json()) as {
+      result: {
+        tools: Array<{
+          name: string;
+          annotations?: { readOnlyHint?: boolean };
+        }>;
+      };
+    };
+    expect(json.result.tools.map((t) => t.name)).toEqual([
+      "get_outline",
+      "search_nodes",
+      "add_node",
+      "add_subtree",
+      "update_node",
+      "delete_node",
+      "move_nodes",
+      "add_to_today",
+      "mirror_node",
+      "mirror_to_today",
+      "import_opml",
+      "export_opml",
+      "list_library",
+      "create_folder",
+      "create_note",
+      "move_note",
+    ]);
+    const byName = new Map(json.result.tools.map((t) => [t.name, t]));
+    expect(byName.get("list_library")?.annotations?.readOnlyHint).toBe(true);
+    expect(byName.get("create_note")?.annotations?.readOnlyHint).toBe(false);
+  });
+
+  test("create_note files a titled forest in a new Agent folder, stamped with origin", async () => {
+    const fake = makeStore(fixture());
+    const json = await callTool(fake.store, "create_note", {
+      title: "Findings",
+      children: [{ text: "first", children: [{ text: "nested" }] }],
+    });
+    expect(json.result?.isError).toBeUndefined();
+    // One atomic node batch: the title at the top level, after the last root.
+    expect(fake.batches).toHaveLength(1);
+    const created = inserts(fake.batches[0]!);
+    const root = created.find((n) => n.text === "Findings")!;
+    expect(root.parentId).toBeNull();
+    expect(root.prevSiblingId).toBe("b");
+    expect(root.origin).toBe("TestAgent");
+    expect(created.find((n) => n.text === "first")?.parentId).toBe(root.id);
+
+    const lib = rows(fake);
+    const folder = lib.find((r) => r.type === "folder")!;
+    expect(folder).toMatchObject({
+      id: "f_agent",
+      title: "Agent",
+      parentId: null,
+    });
+    expect(lib.find((r) => r.type === "note")).toMatchObject({
+      parentId: "f_agent",
+      rootNodeId: root.id,
+    });
+    expect(toolText(json)).toContain(`node id: ${root.id}`);
+    expect(toolText(json)).toContain('folder "Agent"');
+
+    // A second note reuses the folder and sorts after the first.
+    await callTool(fake.store, "create_note", { title: "More" });
+    const notes = rows(fake)
+      .filter((r) => r.type === "note")
+      .sort((a, b) => (a.rank < b.rank ? -1 : 1));
+    expect(rows(fake).filter((r) => r.type === "folder")).toHaveLength(1);
+    expect(notes.map((n) => fake.nodes.get(n.rootNodeId!)?.text)).toEqual([
+      "Findings",
+      "More",
+    ]);
+  });
+
+  test("create_note uses a folder the user named Agent, and refuses a bad folder id before writing", async () => {
+    const fake = makeStore(fixture());
+    fake.library.set("f_mine", {
+      id: "f_mine",
+      type: "folder",
+      parentId: null,
+      rank: "m",
+      title: "agent",
+    });
+    await callTool(fake.store, "create_note", { title: "Here" });
+    expect(rows(fake).find((r) => r.type === "note")?.parentId).toBe("f_mine");
+
+    const bad = await callTool(fake.store, "create_note", {
+      title: "Nowhere",
+      folderId: "f_missing",
+    });
+    expect(bad.result?.isError).toBe(true);
+    expect(toolText(bad)).toContain("no folder");
+    expect(fake.batches).toHaveLength(1);
+  });
+
+  test("create_folder nests and orders; list_library renders the tree and the unfiled roots", async () => {
+    const fake = makeStore(fixture());
+    const made = await callTool(fake.store, "create_folder", {
+      title: "Projects",
+    });
+    const projects = /folder id: (\S+)\)/.exec(toolText(made))![1]!;
+    await callTool(fake.store, "create_folder", {
+      title: "Q3",
+      parentFolderId: projects,
+    });
+    await callTool(fake.store, "move_note", {
+      nodeId: "a",
+      folderId: projects,
+    });
+    expect(rows(fake).find((r) => r.rootNodeId === "a")?.parentId).toBe(
+      projects,
+    );
+
+    const listed = toolText(await callTool(fake.store, "list_library", {}));
+    expect(listed).toContain(`- [folder] Projects (folder id: ${projects})`);
+    expect(listed).toMatch(/\n {2}- \[folder\] Q3 \(folder id: /);
+    expect(listed).toContain("  - alpha (note; node id: a)");
+    expect(listed).toContain(
+      "Unfiled top-level nodes (1):\n- bravo (node id: b)",
+    );
+
+    const nested = await callTool(fake.store, "create_folder", {
+      title: "Lost",
+      parentFolderId: "nope",
+    });
+    expect(nested.result?.isError).toBe(true);
+  });
+
+  test("move_note moves an existing row, files to the library top, and refuses non-top-level nodes", async () => {
+    const fake = makeStore(fixture());
+    await callTool(fake.store, "create_folder", { title: "One" });
+    const one = rows(fake)[0]!.id;
+    await callTool(fake.store, "move_note", { nodeId: "a", folderId: one });
+    await callTool(fake.store, "move_note", {
+      nodeId: "b",
+      folderId: one,
+      position: "first",
+    });
+    const inOne = rows(fake)
+      .filter((r) => r.parentId === one)
+      .sort((x, y) => (x.rank < y.rank ? -1 : 1))
+      .map((r) => r.rootNodeId);
+    expect(inOne).toEqual(["b", "a"]);
+
+    const moved = await callTool(fake.store, "move_note", { nodeId: "a" });
+    expect(toolText(moved)).toContain("Moved note");
+    const aRows = rows(fake).filter((r) => r.rootNodeId === "a");
+    expect(aRows).toHaveLength(1);
+    expect(aRows[0]!.parentId).toBeNull();
+
+    const child = await callTool(fake.store, "move_note", { nodeId: "a1" });
+    expect(child.result?.isError).toBe(true);
+    expect(toolText(child)).toContain("not top-level");
+    // The outline itself never changes.
+    expect(fake.batches).toHaveLength(0);
+  });
+
+  test("move_note refuses the Daily container and moves every row filing a node", async () => {
+    const fake = makeStore(fixture(), [{ key: "container", nodeId: "b" }]);
+    const daily = await callTool(fake.store, "move_note", { nodeId: "b" });
+    expect(daily.result?.isError).toBe(true);
+    expect(toolText(daily)).toContain("Daily container");
+
+    // Two rows file node a (a device that hadn't refetched filed it again);
+    // one carries a field this version doesn't know.
+    fake.library.set("f1", {
+      id: "f1",
+      type: "folder",
+      parentId: null,
+      rank: "m",
+      title: "One",
+    });
+    fake.library.set("n1", {
+      id: "n1",
+      type: "note",
+      parentId: null,
+      rank: "a",
+      rootNodeId: "a",
+      color: "red",
+    });
+    fake.library.set("n2", {
+      id: "n2",
+      type: "note",
+      parentId: null,
+      rank: "b",
+      rootNodeId: "a",
+    });
+    await callTool(fake.store, "move_note", { nodeId: "a", folderId: "f1" });
+    const notes = rows(fake).filter((r) => r.rootNodeId === "a");
+    expect(notes.map((r) => r.parentId)).toEqual(["f1", "f1"]);
+    expect(fake.library.get("n1")).toMatchObject({ color: "red" });
+  });
+
+  test("create_note reuses an Agent folder drawn at the top even if its parent is gone, and never overwrites the fixed id", async () => {
+    const fake = makeStore(fixture());
+    fake.library.set("f_mine", {
+      id: "f_mine",
+      type: "folder",
+      parentId: "f_deleted",
+      rank: "m",
+      title: "Agent",
+    });
+    await callTool(fake.store, "create_note", { title: "Here" });
+    expect(rows(fake).find((r) => r.type === "note")?.parentId).toBe("f_mine");
+
+    const other = makeStore(fixture());
+    // A malformed row already holds the fixed id: the new folder takes another.
+    other.library.set("f_agent", {
+      id: "f_agent",
+      type: "folder",
+      title: null,
+    });
+    await callTool(other.store, "create_note", { title: "There" });
+    expect(other.library.get("f_agent")).toMatchObject({ title: null });
+    expect(rows(other).find((r) => r.type === "note")?.parentId).toBe(
+      "f_agent_2",
+    );
   });
 });
