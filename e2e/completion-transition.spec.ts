@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { scrollOutlineTo, seedOutline, type SeedNode } from "./fixtures";
+import {
+  outlineContentTop,
+  scrollOutlineTo,
+  seedOutline,
+  type SeedNode,
+} from "./fixtures";
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -417,7 +422,7 @@ test("a large disappearing subtree stays windowed and hands focus to an initiall
     text: `Step ${i}`,
   }));
   await load(page, [...TREE.filter((n) => n.id !== "child"), ...children]);
-  const targetTop = (await row(page, "task").boundingBox())!.y;
+  const targetTop = await outlineContentTop(row(page, "task"));
   await expect(row(page, "after")).toHaveCount(0);
   await text(page, "task").focus();
   await page.keyboard.press(`${MOD}+Enter`);
@@ -433,11 +438,7 @@ test("a large disappearing subtree stays windowed and hands focus to an initiall
     animation.pause();
     animation.currentTime = 160;
   });
-  expect(
-    await row(page, "after").evaluate(
-      (el) => el.getBoundingClientRect().y + window.scrollY,
-    ),
-  ).toBeCloseTo(targetTop, 0);
+  expect(await outlineContentTop(row(page, "after"))).toBeCloseTo(targetTop, 0);
   await page.clock.runFor(208);
   await expect(text(page, "after")).toBeFocused();
   await expect(page.locator("li[data-node-id]")).toHaveCount(2);

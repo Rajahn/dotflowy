@@ -1,4 +1,4 @@
-import type { Page, Route, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, Route, WebSocketRoute } from "@playwright/test";
 
 import { Schema } from "effect";
 
@@ -27,6 +27,19 @@ export async function openSeededOutline(
       )
     : page.locator(".outline-list");
   await ready.waitFor({ state: "visible" });
+}
+
+/** An element's top in the outline's scroll-content frame (the first pane
+ *  root on a wide screen, the document on a narrow one), so a measure taken
+ *  before a scroll compares with one taken after it. */
+export async function outlineContentTop(locator: Locator): Promise<number> {
+  return locator.evaluate((el) => {
+    const scroller = document.querySelector<HTMLElement>("[data-pane-scroll]");
+    const top = el.getBoundingClientRect().y;
+    return scroller
+      ? top - scroller.getBoundingClientRect().y + scroller.scrollTop
+      : top + window.scrollY;
+  });
 }
 
 /** Scroll the outline: the first workbench pane root on a wide screen (each

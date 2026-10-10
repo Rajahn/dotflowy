@@ -144,6 +144,7 @@ import {
   openDeleteConfirm,
 } from "./delete-confirm-opener";
 import { consumeFlashAfterNav, flashRow } from "./flash-node";
+import { carryFocus, takeCarriedFocus } from "./focus-carry";
 import { Header } from "./Header";
 import { captureTextHistory, runHistoryRestore } from "./history-restore";
 import { exposeHotkeyManagerForDev } from "./hotkey-devtools";
@@ -827,6 +828,39 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
     pendingFocus,
     pendingFocusAtStart,
   ]);
+
+  // Across a remount for the scroll mode (focus-carry.ts): hand the caret
+  // over when leaving, and take it back once this view's rows exist.
+  const takenCarry = useRef(false);
+  useLayoutEffect(() => {
+    if (loading || takenCarry.current) return;
+    takenCarry.current = true;
+    const carry = takeCarriedFocus(paneId, rootId);
+    if (!carry || !rows.some((r) => r.key === carry.key)) return;
+    pendingFocus.current = carry.key;
+    setPendingCaretOffset(carry.key, carry.offset);
+    const el = refs.get(carry.key);
+    if (el) {
+      el.focus({ preventScroll: true });
+      applyPendingCaret(el, carry.key, false);
+      pendingFocus.current = null;
+    } else if (!scrollRowIntoView(carry.key, "center", paneId)) {
+      pendingFocus.current = null;
+      clearPendingCaretOffset();
+    }
+  }, [loading, paneId, rootId, rows, refs, pendingFocus]);
+  useLayoutEffect(
+    () => () => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || !active.matches(".node-text"))
+        return;
+      const key = active.dataset.historyKey;
+      if (!key || refs.get(key) !== active) return;
+      carryFocus(paneId, { rootId, key, offset: getCaretOffset(active) });
+    },
+    [paneId, rootId, refs],
+  );
+
   // Who scrolls this outline: the pane root on a wide screen, the window on a
   // narrow one (pane-scroll.ts). Fixed per mount -- the workbench keys the
   // editor by it -- so the virtualizer hook choice below is stable.
