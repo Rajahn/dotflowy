@@ -83,6 +83,9 @@ interface RowRect {
 }
 
 interface DragDeps {
+  /** The workbench pane this editor renders in: the drag's geometry (virtual
+   *  nav) and selection slab are that pane's. */
+  paneId: string;
   getIndex: () => TreeIndex;
   getRootId: () => string | null;
   /** The composed Seam-G visibility prune (hide-completed today). Drag mirrors
@@ -328,9 +331,10 @@ export function useDragReorder(deps: DragDeps) {
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();
     const scrollY = window.scrollY;
+    const paneId = depsRef.current.paneId;
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
-      const vr = virtualRowRect(r.key, scrollY);
+      const vr = virtualRowRect(r.key, scrollY, paneId);
       if (!vr) continue;
       // Uniform indent: depth-0 left is the container left; deeper rows add
       // depth * indent (OutlineRow's paddingInlineStart). project() backs
@@ -504,7 +508,7 @@ export function useDragReorder(deps: DragDeps) {
       // Snapshot selection ownership at press time, before any compatibility
       // mouse/focus events can run. Pointer cancel and failed async drops leave
       // the actor itself untouched; this snapshot only drives the gesture.
-      const selected = getSelectionDragSet(grabbedKey);
+      const selected = getSelectionDragSet(depsRef.current.paneId, grabbedKey);
       state.current = {
         id: grabbedKey,
         nodeIds: selected?.rootIds ?? [instanceIdForKey(grabbedKey)],

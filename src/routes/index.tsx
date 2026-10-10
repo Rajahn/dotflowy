@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { OutlineEditor } from "../components/OutlineEditor";
 import { validateOutlineSearch } from "../data/tags";
+import { Workbench } from "../workbench/Workbench";
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -9,9 +9,5 @@ export const Route = createFileRoute("/")({
 });
 
 function HomePage() {
-  return (
-    <main>
-      <OutlineEditor rootId={null} />
-    </main>
-  );
+  return <Workbench rootId={null} />;
 }

@@ -4,7 +4,7 @@
 
 ## 下一步
 
-P1（PaneContext）：分支 `workbench/p1-pane-context`，按 PLAN 3 节 P1 推进。
+P2（每列独立滚动）：分支 `workbench/p2-pane-scroll`（本地已写好，待 rebase 到 main 后跑门槛）。
 
 ## 分期进度
 
@@ -43,6 +43,7 @@ P1（PaneContext）：分支 `workbench/p1-pane-context`，按 PLAN 3 节 P1 推
 
 - **确定失败，已在本 PR 修复**：`classic-recovery.spec.ts` ×4。测试自带的 `node()` 构造器缺 `locked` 字段（ADR 0067 加字段时漏改），planner 解码时报 `Missing key at ["locked"]`。补 `locked: false` 后 4 条全过。只改测试 helper，没碰 Lunora 保留导出。
 - **确定失败，环境相关，未修**：`week-calendar.spec.ts:461`（"enabling reduced motion cancels an active pill without replay"）。单独重跑仍失败：`page.emulateMedia({ reducedMotion: "reduce" })` 之后选中块仍带 `week-calendar-selection-slide`。怀疑是本机 Chromium 141（见下）与 motion 的 reduced-motion 监听不配合。后续各期以"不新增失败"为准，这一条列为已知。
+- **确定或高频失败，main 上同样存在**：`undo-redo.spec.ts:527`（"undo in a filter input does not undo outline authoring"）。在 main 上单独重复 3 次全部失败，P1 上 3 次失败 2 次；与工作台无关，列为已知。
 - **负载抖动（单独重跑全过）**：`drag-reorder:88`、`emphasis:132/145`、`opml-import:193`、`route-bible:206/245/310`、`settings:239`、`todos:293`、`zoom-perf:98/120`。都是首屏 5 秒内没渲染出来，属于本机 4 核下 Vite dev server 被打满。
 
 ### 云端环境备注（给后续会话）
@@ -62,6 +63,10 @@ P1（PaneContext）：分支 `workbench/p1-pane-context`，按 PLAN 3 节 P1 推
 
 - 自托管时 MCP 的付费门槛：直接在 D1 插一条订阅行（不改代码，同 `scripts/comp-dev-plan.ts`），还是加一个配置开关跳过门槛。本轮不改 billing。
 
+### P1 门槛
+
+全量 e2e 490/505；除已知两条外，其余失败在单独重跑时全部通过。新增单测：按列读写 view-state、宿主分发热键。
+
 ## 偏离方案记录
 
 （实现与 PLAN 不同的地方及原因。）
@@ -69,3 +74,4 @@ P1（PaneContext）：分支 `workbench/p1-pane-context`，按 PLAN 3 节 P1 推
 - P0：PLAN 说 P0 只改 STATUS 和空 changeset。另外修了 `e2e/classic-recovery.spec.ts` 的一行 fixture（补 `locked: false`），否则后续每期的 e2e 门槛都带着 4 条确定失败。
 - 全期：本地 e2e 用 1 个 worker + 预热（见上），而不是 CONTRIBUTING 里的 `--workers=2`。
 - 全期：PLAN 4.2 写的是用 `gh api` 开 PR、合并；本会话没有 `gh`，改用 GitHub MCP 工具做同样的 REST 操作。
+- P1：查询筛选的输入框控制器和 Cmd+F 仍是全局，推迟到 P3（筛选变成页签状态时一起改）。

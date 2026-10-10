@@ -6,7 +6,7 @@ import type { NodeCommands } from "../components/node-commands";
 import type { TokenView } from "./types";
 
 import { getTreeIndex } from "../data/tree-store";
-import { getViewRootId } from "../data/view-state";
+import { getViewRootIdForElement } from "../data/view-state";
 import { spliceToken } from "./token-splice";
 
 // `spliceToken` moved to the dependency-free `token-splice.ts` so worker-reachable
@@ -50,6 +50,6 @@ export function replaceTokenInNode(
 export function resolveNodeId(el: HTMLElement): string | null {
   return (
     el.closest<HTMLElement>("[data-node-id]")?.getAttribute("data-node-id") ??
-    getViewRootId()
+    getViewRootIdForElement(el)
   );
 }

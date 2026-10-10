@@ -36,6 +36,7 @@ import {
   outdentManyNodes,
   removeManyNodes,
 } from "../data/mutations";
+import { getActivePaneId, paneElement } from "../data/panes";
 import {
   clearSelection,
   extendSelection,
@@ -89,6 +90,9 @@ import { SlashMenuList, type MenuListItem } from "./slash-menu-list";
 
 interface SelectionModeArgs {
   refs: Map<string, HTMLSpanElement | null>;
+  /** The workbench pane this editor renders in. Only the active pane's editor
+   *  owns the while-selected window keys, so N columns never act N times. */
+  paneId: string;
   /** The editor's post-render focus target (FocusPass consumes it). A delete
    *  sets it to the surviving neighbor. */
   pendingFocus: RefObject<string | null>;
@@ -109,7 +113,7 @@ export interface SelectionOps {
 function makeSelectionOps({
   refs,
   pendingFocus,
-}: SelectionModeArgs): SelectionOps {
+}: Omit<SelectionModeArgs, "paneId">): SelectionOps {
   const rowOf = (id: string) => refs.get(id)?.closest(".outline-row") ?? null;
 
   const focusNode = (id: string) => {
@@ -346,7 +350,14 @@ function makeSelectionOps({
  * state, so the only effect dep is `active` (toggles the listeners) plus the
  * stable `ops`.
  */
-export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
+/** The pane the live selection was made in, or null while idle. */
+let selectionOwner: string | null = null;
+
+export function useSelectionMode({
+  refs,
+  pendingFocus,
+  paneId,
+}: SelectionModeArgs) {
   // refs is a stable useState Map and pendingFocus a stable ref -- so ops keeps
   // its identity and the listener effect below only re-subscribes when `active`
   // flips, never per render. (getCtx is only for the menu's plugin commands.)
@@ -356,15 +367,27 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
   );
   const active = useIsSelectionActive();
 
-  // Clear any stale selection carried across an editor (re)mount -- the
-  // singleton outlives the per-zoom remount, but a new view starts caret-first.
+  // Clear any stale selection carried across this pane's editor (re)mount --
+  // the singleton outlives the per-zoom remount, but a new view starts
+  // caret-first. Another pane mounting leaves a selection made elsewhere alone.
   useEffect(() => {
-    clearSelection();
+    if (selectionOwner === null || selectionOwner === paneId) clearSelection();
+    // Mount-only: paneId is fixed for an editor.
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, []);
+
+  // A selection belongs to the pane it was made in (keyboard selection starts
+  // from a focused bullet, so that pane is active). Only that pane's editor
+  // owns the while-selected window keys and mouse.
+  useEffect(() => {
+    if (active && selectionOwner === null) selectionOwner = getActivePaneId();
+    if (!active) selectionOwner = null;
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
+      if ((selectionOwner ?? getActivePaneId()) !== paneId) return;
       const mod = e.metaKey || e.ctrlKey;
       if (e.key === "Escape") {
         e.preventDefault();
@@ -429,6 +452,7 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
     // (whose buttons run a command). A bullet click also focuses it, which
     // clears via onFocus; this covers clicks on empty space too.
     const onDown = (e: MouseEvent) => {
+      if ((selectionOwner ?? getActivePaneId()) !== paneId) return;
       // SAFETY: a window mousedown target is a DOM element
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="listbox"]')) return;
@@ -445,7 +469,7 @@ export function useSelectionMode({ refs, pendingFocus }: SelectionModeArgs) {
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("mousedown", onDown, true);
     };
-  }, [active, ops]);
+  }, [active, ops, paneId]);
 
   return { active, ops };
 }
@@ -476,9 +500,12 @@ type SelItem = MenuListItem & { run: () => void };
 export function SelectionActionsMenu({
   ops,
   getCtx,
+  paneId,
 }: {
   ops: SelectionOps;
   getCtx: () => PluginContext;
+  /** The pane whose rows anchor the menu (the same node may render in two). */
+  paneId: string;
 }) {
   const { selectionCommandSpecs } = usePluginChrome();
   const active = useIsSelectionActive();
@@ -516,7 +543,7 @@ export function SelectionActionsMenu({
       refs.setReference(null);
       return;
     }
-    const row = document.querySelector(
+    const row = paneElement(paneId)?.querySelector(
       `li[data-node-id="${focusId}"] > .outline-row`,
     );
     if (row instanceof HTMLElement) {
@@ -530,7 +557,7 @@ export function SelectionActionsMenu({
     }
     update();
     setHover(0);
-  }, [active, focusId, rootIds, refs, update]);
+  }, [active, focusId, rootIds, refs, update, paneId]);
 
   const items =
     active && rootIds.length
