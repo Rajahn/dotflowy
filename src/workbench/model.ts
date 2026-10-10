@@ -283,9 +283,6 @@ export function resolveUrlChange(
     // 3. Otherwise the active tab zooms there.
     return { kind: "zoom", paneId: pane.id, tabId: tab.id };
   }
-  // The bare start URL (`/`, the home-screen launch) names no view: the
-  // restored layout keeps its own active tab.
-  if (target.rootId === null && !target.q) return undefined;
   // A deep link: an existing tab wins, else a new pinned tab -- except into
   // the untouched default layout, whose lone tab simply shows it.
   const open = findTabShowing(state, pane.id, target.rootId);
