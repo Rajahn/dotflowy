@@ -82,10 +82,9 @@ test.describe("/delete slash command", () => {
     ).toBeVisible();
     await page.keyboard.press("Enter");
 
-    // Deleting the zoom root leaves the deep-link on a now-missing node, so the
-    // editor shows its "doesn't exist" placeholder rather than crashing.
-    await expect(
-      page.getByText("That bullet doesn't exist", { exact: false }),
-    ).toBeVisible();
+    // Deleting the zoom root closes the tab showing it (ADR 0069): the last
+    // column is left empty, on the top-level URL, rather than on a missing node.
+    await expect(page.getByText("Open a note from the sidebar.")).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
   });
 });

@@ -2,22 +2,34 @@ import { useCallback, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 
 import { getNodeActionBridge } from "../data/command-bridge";
+import { setCaptureListener } from "../data/history";
 import {
   DEFAULT_PANE_ID,
+  forgetPaneFocus,
   getActivePaneId,
   setActivePaneId,
 } from "../data/panes";
+import { forgetSelectionFillPane } from "../data/selection-fill";
 import { childrenOf } from "../data/tree";
 import { getTreeIndex } from "../data/tree-store";
-import { getViewIsHiddenFor } from "../data/view-state";
+import { forgetPaneView, getViewIsHiddenFor } from "../data/view-state";
 import { hasMatchMedia, hasWindow, isBrowser } from "../env";
 import {
   activeTab,
+  activeTabOf,
   applyUrlResolution,
+  closeTab,
+  closeTabsWhere,
   defaultLayout,
+  findPane,
   focusTab,
+  moveTab,
+  openTab,
+  pinTab,
   resolveUrlChange,
+  setPaneWidths,
   setTabView,
+  splitPane,
   updateTab,
   zoomTab,
   type TabView,
@@ -45,6 +57,17 @@ export function newTabId(): string {
   return `t${seq}`;
 }
 
+let paneSeq = 0;
+/** A pane id unique within the layout; never the default pane's. */
+export function newPaneId(): string {
+  let id: string;
+  do {
+    paneSeq += 1;
+    id = `p${paneSeq}`;
+  } while (state.panes.some((p) => p.id === id));
+  return id;
+}
+
 let state: WorkbenchState = defaultLayout(DEFAULT_PANE_ID, newTabId());
 const listeners = new Set<() => void>();
 
@@ -61,8 +84,51 @@ export function subscribeWorkbench(listener: () => void): () => void {
 
 function commit(next: WorkbenchState): void {
   if (next === state) return;
+  // A closed pane's per-pane mirrors go with it, and the active pane always
+  // names a live one.
+  for (const pane of state.panes) {
+    if (next.panes.some((p) => p.id === pane.id)) continue;
+    forgetPaneView(pane.id);
+    forgetSelectionFillPane(pane.id);
+    forgetPaneFocus(pane.id);
+  }
+  if (!next.panes.some((p) => p.id === getActivePaneId())) {
+    const fallback = next.panes[0];
+    if (fallback) setActivePaneId(fallback.id);
+  }
   state = next;
+  noteRecent(next);
   for (const l of listeners) l();
+}
+
+// --- recently opened roots (for an empty pane) ---------------------------------
+
+const RECENT_MAX = 8;
+let recent: string[] = [];
+
+function noteRecent(next: WorkbenchState): void {
+  // The active column is where things are being opened; the others only
+  // keep showing what they showed.
+  const pane = next.panes.find((p) => p.id === getActivePaneId());
+  const root = pane ? activeTabOf(pane)?.rootId : null;
+  if (!root || recent[0] === root) return;
+  recent = [root, ...recent.filter((id) => id !== root)].slice(0, RECENT_MAX);
+  for (const l of recentListeners) l();
+}
+
+const recentListeners = new Set<() => void>();
+const subscribeRecent = (l: () => void) => {
+  recentListeners.add(l);
+  return () => {
+    recentListeners.delete(l);
+  };
+};
+const getRecent = () => recent;
+const NO_RECENT: string[] = [];
+
+/** Roots opened most recently, newest first (this page only). */
+export function useRecentRoots(): string[] {
+  return useSyncExternalStore(subscribeRecent, getRecent, () => NO_RECENT);
 }
 
 /** Replace the layout wholesale (layout restore, tests). */
@@ -89,6 +155,52 @@ export function usePaneTab(paneId: string): WorkbenchTab | undefined {
  *  Cmd+K command center). */
 export function getActivePaneTab(): WorkbenchTab | undefined {
   return activeTab(state, getActivePaneId());
+}
+
+// --- the sidebar (per device, saved with the layout) ---------------------------
+
+export interface SidebarState {
+  open: boolean;
+  width: number;
+}
+
+export const SIDEBAR_MIN = 180;
+export const SIDEBAR_MAX = 480;
+let sidebar: SidebarState = { open: true, width: 240 };
+const sidebarListeners = new Set<() => void>();
+
+export function getSidebarState(): SidebarState {
+  return sidebar;
+}
+
+export function subscribeSidebar(listener: () => void): () => void {
+  sidebarListeners.add(listener);
+  return () => {
+    sidebarListeners.delete(listener);
+  };
+}
+
+export function setSidebarState(next: Partial<SidebarState>): void {
+  const width =
+    next.width === undefined
+      ? sidebar.width
+      : Math.round(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, next.width)));
+  const open = next.open ?? sidebar.open;
+  if (open === sidebar.open && width === sidebar.width) return;
+  sidebar = { open, width };
+  for (const l of sidebarListeners) l();
+}
+
+export function toggleSidebar(): void {
+  setSidebarState({ open: !sidebar.open });
+}
+
+export function useSidebarState(): SidebarState {
+  return useSyncExternalStore(
+    subscribeSidebar,
+    getSidebarState,
+    getSidebarState,
+  );
 }
 
 // --- one-shot zoom intents ---------------------------------------------------
@@ -311,6 +423,141 @@ export function followUrl(
   setActivePaneId(result.paneId);
   commit(result.state);
 }
+
+// --- tabs and panes (PLAN 1.3) -------------------------------------------------
+
+/**
+ * Open `rootId` in `paneId` (PLAN 1.3): a preview open (a sidebar click)
+ * replaces the pane's preview tab; a pinned open (double-click, Cmd/Ctrl+
+ * click, a drop) adds a tab; a root already open in the pane is focused. The
+ * pane becomes active.
+ */
+export function openInPane(
+  paneId: string,
+  rootId: string | null,
+  opts: { preview: boolean; selectTitle?: boolean },
+): void {
+  const result = openTab(state, paneId, { rootId, q: "" }, opts, newTabId);
+  if (!result) return;
+  const before = activeTab(state, paneId);
+  if (before?.id !== result.tabId || before.rootId !== rootId)
+    setIntent(result.tabId, {
+      scroll: "restore",
+      selectTitle: opts.selectTitle ?? false,
+    });
+  setActivePaneId(paneId);
+  commit(result.state);
+}
+
+/** Pin a preview tab (double-clicking it, or any write into it). */
+export function pinTabById(tabId: string): void {
+  commit(pinTab(state, tabId));
+}
+
+/** Close a tab; its pane closes with its last tab unless it is the last pane. */
+export function closeTabById(tabId: string): void {
+  commit(closeTab(state, tabId));
+}
+
+/** Make a tab (and its pane) active. Switching tabs replaces the URL. */
+export function focusTabById(paneId: string, tabId: string): void {
+  const pane = findPane(state, paneId);
+  if (!pane) return;
+  if (pane.activeTabId !== tabId) setIntent(tabId, { scroll: "restore" });
+  setActivePaneId(paneId);
+  commit(focusTab(state, paneId, tabId));
+}
+
+/** Make a pane active (its editor keeps whatever it had). */
+export function focusPane(paneId: string): void {
+  if (!findPane(state, paneId)) return;
+  setActivePaneId(paneId);
+  // The URL follows the active tab: nudge the URL sync even though the layout
+  // itself did not change.
+  for (const l of listeners) l();
+}
+
+/** Split the active pane: a new column to its right, showing the same view.
+ *  Returns false at four columns. */
+export function splitActivePane(): boolean {
+  const result = splitPane(state, getActivePaneId(), newTabId, newPaneId);
+  if (!result) return false;
+  setActivePaneId(result.paneId);
+  commit(result.state);
+  return true;
+}
+
+/** Move a tab to another pane's tab bar (or reorder it in its own). */
+export function moveTabTo(
+  tabId: string,
+  toPaneId: string,
+  beforeTabId: string | null,
+): void {
+  setIntent(tabId, { scroll: "restore" });
+  setActivePaneId(toPaneId);
+  commit(moveTab(state, tabId, toPaneId, beforeTabId));
+}
+
+/** Close every tab showing a node that `isGone` (PLAN 1.6). */
+export function closeTabsShowing(isGone: (rootId: string) => boolean): void {
+  commit(closeTabsWhere(state, isGone));
+}
+
+/** Set the panes' relative widths; equal when `widths` is empty. */
+export function setWidths(widths: ReadonlyMap<string, number>): void {
+  if (widths.size === 0) {
+    commit(setPaneWidths(state, new Map(state.panes.map((p) => [p.id, 1]))));
+    return;
+  }
+  commit(setPaneWidths(state, widths));
+}
+
+/** Focus the pane `delta` columns from the active one (clamped). */
+export function focusAdjacentPane(delta: number): void {
+  const i = state.panes.findIndex((p) => p.id === getActivePaneId());
+  const target =
+    state.panes[Math.max(0, Math.min(state.panes.length - 1, i + delta))];
+  if (target) focusPane(target.id);
+}
+
+/** Focus the Nth column (0-based), if it exists. */
+export function focusPaneAt(n: number): void {
+  const target = state.panes[n];
+  if (target) focusPane(target.id);
+}
+
+/** Step the active pane's active tab `delta` tabs, wrapping. */
+export function cycleTab(delta: number): void {
+  const pane = findPane(state, getActivePaneId());
+  if (!pane || pane.tabs.length < 2) return;
+  const i = pane.tabs.findIndex((t) => t.id === pane.activeTabId);
+  const next = pane.tabs[(i + delta + pane.tabs.length) % pane.tabs.length];
+  if (next) focusTabById(pane.id, next.id);
+}
+
+/** Close the active pane's active tab. */
+export function closeActiveTab(): void {
+  const tab = activeTab(state, getActivePaneId());
+  if (tab) closeTabById(tab.id);
+}
+
+/** Pin the active pane's active tab. */
+export function pinActiveTab(): void {
+  const tab = activeTab(state, getActivePaneId());
+  if (tab) pinTabById(tab.id);
+}
+
+// A write pins the preview tab it lands in (PLAN 1.3): the tab the capture
+// names, or -- for a capture without a location -- the active pane's. A
+// location without a tab (quick-add) writes elsewhere and pins nothing.
+setCaptureListener((location) => {
+  const tabId = location
+    ? location.tabId
+    : activeTab(state, getActivePaneId())?.id;
+  if (!tabId) return;
+  const next = pinTab(state, tabId);
+  if (next !== state) commit(next);
+});
 
 /**
  * Show `rootId` for a history restore (PLAN 2.8): back in the tab the edit

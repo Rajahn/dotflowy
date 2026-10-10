@@ -63,7 +63,12 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
-import { contentOrigin, contentY, scrollerOf } from "../data/pane-scroll";
+import {
+  contentOrigin,
+  contentY,
+  paneScroller,
+  scrollerOf,
+} from "../data/pane-scroll";
 import { paneElement, useIsActivePane } from "../data/panes";
 import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
@@ -995,7 +1000,7 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
         // The scroll mode is the pane's, not whatever the DOM shows right now
         // (the list ref is null while loading).
         contentTop: () =>
-          contentOrigin(windowScroll ? null : scrollerOf(listRef.current)),
+          contentOrigin(windowScroll ? null : paneScroller(paneId)),
       }),
     [paneId, virtualizer, windowScroll],
   );
@@ -1009,7 +1014,7 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   const lastScrollTop = useRef(0);
   useLayoutEffect(() => {
     if (windowScroll || loading || scrollPlaced.current) return;
-    const scroller = paneElement(paneId);
+    const scroller = paneScroller(paneId);
     if (!scroller) return;
     scrollPlaced.current = true;
     // A fresh zoom starts at the top; any other mount of this view (back and
@@ -1022,7 +1027,7 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   });
   useEffect(() => {
     if (windowScroll) return;
-    const scroller = paneElement(paneId);
+    const scroller = paneScroller(paneId);
     if (!scroller) return;
     const onScroll = () => {
       lastScrollTop.current = scroller.scrollTop;

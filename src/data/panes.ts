@@ -71,3 +71,21 @@ export function useIsActivePane(paneId: string): boolean {
     () => paneId === DEFAULT_PANE_ID,
   );
 }
+
+// The row key each pane last had the caret in (its `data-history-key`), so
+// keyboard focus can return there when a pane is re-entered from the keyboard
+// (docs/workbench/PLAN.md 1.5).
+const lastFocused = new Map<string, string>();
+
+export function rememberPaneFocus(paneId: string, rowKey: string): void {
+  lastFocused.set(paneId, rowKey);
+}
+
+export function getPaneFocus(paneId: string): string | null {
+  return lastFocused.get(paneId) ?? null;
+}
+
+/** Drop a closed pane's remembered row (a later pane may reuse its id). */
+export function forgetPaneFocus(paneId: string): void {
+  lastFocused.delete(paneId);
+}

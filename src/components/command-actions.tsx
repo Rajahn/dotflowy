@@ -1,5 +1,11 @@
 import {
   ALargeSmallIcon,
+  ArrowLeftToLineIcon,
+  ArrowRightToLineIcon,
+  Columns2Icon,
+  PanelLeftIcon,
+  PinIcon,
+  XIcon,
   BookmarkIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
@@ -31,6 +37,15 @@ import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
 import { useActivePaneRootId } from "../workbench/hooks";
+import { MAX_PANES } from "../workbench/model";
+import {
+  closeActiveTab,
+  focusAdjacentPane,
+  pinActiveTab,
+  splitActivePane,
+  toggleSidebar,
+  useWorkbenchState,
+} from "../workbench/store";
 import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
@@ -72,6 +87,7 @@ export function useGlobalActions(opts: {
   const { index } = useTree();
   // The active pane's zoom root: Cmd+K acts on the pane that had focus.
   const rootId = useActivePaneRootId();
+  const paneCount = useWorkbenchState().panes.length;
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const history = useHistoryState();
 
@@ -193,6 +209,69 @@ export function useGlobalActions(opts: {
         // The switcher closes first (runAction), releasing focus; the opener
         // defers focus a frame so the input wins the focus race (ADR 0047 §6).
         run: () => openFilterInput(),
+      },
+      // Workbench layout (docs/workbench/PLAN.md 1.3, 1.5). Every shortcut
+      // also lives here, so a chord is never the only way in.
+      {
+        id: "g:split",
+        label: "Split right",
+        description:
+          paneCount >= MAX_PANES
+            ? "At most four columns"
+            : "Open this view in a new column to the right",
+        icon: Columns2Icon,
+        scope: "global",
+        keywords: ["split", "column", "pane", "side by side"],
+        hotkey: ["⌘", "\\"],
+        disabled: paneCount >= MAX_PANES,
+        run: () => void splitActivePane(),
+      },
+      {
+        id: "g:close-tab",
+        label: "Close tab",
+        description: "Close the active tab",
+        icon: XIcon,
+        scope: "global",
+        keywords: ["close", "tab"],
+        run: () => closeActiveTab(),
+      },
+      {
+        id: "g:pin-tab",
+        label: "Keep tab open",
+        description: "Pin the preview tab so the next note opens beside it",
+        icon: PinIcon,
+        scope: "global",
+        keywords: ["pin", "keep", "preview", "tab"],
+        run: () => pinActiveTab(),
+      },
+      {
+        id: "g:pane-left",
+        label: "Focus column on the left",
+        description: "Move to the column on the left",
+        icon: ArrowLeftToLineIcon,
+        scope: "global",
+        keywords: ["column", "pane", "left", "focus"],
+        disabled: paneCount < 2,
+        run: () => focusAdjacentPane(-1),
+      },
+      {
+        id: "g:pane-right",
+        label: "Focus column on the right",
+        description: "Move to the column on the right",
+        icon: ArrowRightToLineIcon,
+        scope: "global",
+        keywords: ["column", "pane", "right", "focus"],
+        disabled: paneCount < 2,
+        run: () => focusAdjacentPane(1),
+      },
+      {
+        id: "g:sidebar",
+        label: "Toggle sidebar",
+        description: "Show or hide the notes sidebar",
+        icon: PanelLeftIcon,
+        scope: "global",
+        keywords: ["sidebar", "notes", "folders", "library"],
+        run: () => toggleSidebar(),
       },
     ];
 
@@ -326,5 +405,6 @@ export function useGlobalActions(opts: {
     rootNode,
     openConnect,
     daily,
+    paneCount,
   ]);
 }

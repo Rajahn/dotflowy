@@ -13,6 +13,8 @@
  * `window.scrollBy` goes through here so it works in both modes.
  */
 
+import { paneElement } from "./panes";
+
 /** The element that scrolls `el`'s pane, or null when the window does. */
 export function scrollerOf(el: Element | null | undefined): HTMLElement | null {
   return el?.closest<HTMLElement>("[data-pane-scroll]") ?? null;
@@ -66,4 +68,13 @@ export function contentY(
 export function contentOrigin(scroller: HTMLElement | null): number {
   if (!scroller) return -window.scrollY;
   return scroller.getBoundingClientRect().top - scroller.scrollTop;
+}
+
+/** The pane root's own scroll box (wide screens), or null when the window
+ *  scrolls or the pane isn't mounted. */
+export function paneScroller(paneId: string): HTMLElement | null {
+  const pane = paneElement(paneId);
+  if (!pane) return null;
+  if (pane.hasAttribute("data-pane-scroll")) return pane;
+  return pane.querySelector<HTMLElement>("[data-pane-scroll]");
 }
