@@ -878,10 +878,23 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
   useLayoutEffect(() => {
     const measure = () => {
       const el = listRef.current;
-      if (el)
-        setScrollMargin(
-          contentY(scrollerOf(el), el.getBoundingClientRect().top),
-        );
+      if (!el) return;
+      const scroller = scrollerOf(el);
+      // The layout position, not the painted one: the content's one-shot
+      // entrance (.outline-reveal) slides the list in with a transform, and a
+      // margin measured mid-slide would offset every row for the whole view.
+      let shift = 0;
+      for (
+        let a: HTMLElement | null = el;
+        a && a !== scroller;
+        a = a.parentElement
+      ) {
+        const t = getComputedStyle(a).transform;
+        if (t !== "none") shift += new DOMMatrixReadOnly(t).m42;
+      }
+      setScrollMargin(
+        contentY(scroller, el.getBoundingClientRect().top - shift),
+      );
     };
     measure();
     // Re-measure when the sticky header resizes (the tag-filter subheader is a
