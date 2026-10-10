@@ -20,6 +20,9 @@ export interface DragSurface {
   getListEl: () => HTMLElement | null;
   /** Focus and flash a node after a drop landed in this pane. */
   land: (nodeId: string) => void;
+  /** Flash a node as it appears here, without moving the caret (a keyboard
+   *  move into this column leaves the caret in its source). */
+  flash: (nodeId: string) => void;
 }
 
 const surfaces = new Map<string, DragSurface>();

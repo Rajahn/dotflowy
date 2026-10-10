@@ -2,6 +2,8 @@ import {
   ALargeSmallIcon,
   ArrowLeftToLineIcon,
   ArrowRightToLineIcon,
+  ArrowBigLeftDashIcon,
+  ArrowBigRightDashIcon,
   Columns2Icon,
   PanelLeftIcon,
   PinIcon,
@@ -34,8 +36,10 @@ import type { CommandCenterAction } from "../data/command-center";
 import { useEditorFeatures } from "../data/editor-features";
 import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
+import { getActivePaneId, getPaneFocus } from "../data/panes";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
+import { moveToAdjacentColumn } from "../workbench/column-move-action";
 import { useActivePaneRootId } from "../workbench/hooks";
 import { MAX_PANES } from "../workbench/model";
 import {
@@ -263,6 +267,32 @@ export function useGlobalActions(opts: {
         keywords: ["column", "pane", "right", "focus"],
         disabled: paneCount < 2,
         run: () => focusAdjacentPane(1),
+      },
+      {
+        id: "g:move-left",
+        label: "Move to column on the left",
+        description:
+          "Move the selection, or the bullet you were on, into the left column",
+        icon: ArrowBigLeftDashIcon,
+        scope: "global",
+        keywords: ["move", "column", "pane", "left", "send"],
+        hotkey: ["⌃", "⌥", "←"],
+        disabled: paneCount < 2,
+        run: () =>
+          void moveToAdjacentColumn(-1, getPaneFocus(getActivePaneId())),
+      },
+      {
+        id: "g:move-right",
+        label: "Move to column on the right",
+        description:
+          "Move the selection, or the bullet you were on, into the right column",
+        icon: ArrowBigRightDashIcon,
+        scope: "global",
+        keywords: ["move", "column", "pane", "right", "send"],
+        hotkey: ["⌃", "⌥", "→"],
+        disabled: paneCount < 2,
+        run: () =>
+          void moveToAdjacentColumn(1, getPaneFocus(getActivePaneId())),
       },
       {
         id: "g:sidebar",

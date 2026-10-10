@@ -39,6 +39,21 @@ columns, and gains a copy mode.
   through mirrors, the filtered-view "moved but hidden" toast); copies,
   selections and cross-column drops go through one `commitDrop`.
 
+## Keyboard moves (added with the keyboard)
+
+- **Ctrl+Alt+←/→ moves, never copies**, the selection's roots (else the row
+  with the caret) into the active tab of the adjacent column, right after the
+  row that column last had the caret in, as its next sibling. When that row is
+  gone, outside the column's zoom root, or inside the moved nodes, they go to
+  the end of the zoom root (`columnMoveSlot`, unit-tested).
+- **The caret stays in the source column**, on the row after the moved block,
+  else the row before it, else the zoom title (`columnMoveLanding`). The target
+  column flashes the landed row and remembers it, so repeated moves stack in
+  order.
+- It goes through the same `commitDrop`: one capture, refusals as a toast.
+- The `/move` picker lists the open tabs' roots first, so the same move works
+  without a second column, and on a phone.
+
 ## Consequences
 
 - Native HTML drag and drop stays for the workbench's own chrome (sidebar rows,

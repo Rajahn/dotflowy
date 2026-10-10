@@ -26,6 +26,7 @@ import {
 } from "../data/panes";
 import { getTreeIndex, useNode, useTrail } from "../data/tree-store";
 import { useIsMobile } from "../hooks/use-mobile";
+import { moveToAdjacentColumn } from "./column-move-action";
 import {
   hasLibraryDrag,
   hasTabDrag,
@@ -584,6 +585,8 @@ function onWorkbenchKey(e: KeyboardEvent): boolean {
     focusPaneAt(Number(digit[1]) - 1);
     return true;
   }
+  if (ctrlAlt && (e.code === "ArrowLeft" || e.code === "ArrowRight"))
+    return moveToAdjacentColumn(e.code === "ArrowLeft" ? -1 : 1);
   if (ctrlAlt && (e.code === "BracketLeft" || e.code === "BracketRight")) {
     focusAdjacentPane(e.code === "BracketLeft" ? -1 : 1);
     return true;

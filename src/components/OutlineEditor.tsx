@@ -603,6 +603,9 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
             toast("Moved — hidden by the current filter.");
           }
         },
+        flash: (id) => {
+          pendingFlash.current = focusKeyFor(id, id, paneId);
+        },
       }),
     [paneId, refs, pendingFocus, pendingFlash, viewCtx, isHidden],
   );
