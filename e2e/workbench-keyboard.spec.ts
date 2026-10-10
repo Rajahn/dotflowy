@@ -105,6 +105,9 @@ test("Ctrl+Alt+Right moves a bullet after the other column's caret row; one undo
   // Each move is one undo step, back into the left column.
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => order(page, 0)).toEqual(["a1", "a3"]);
+  // An undo pressed while the last one is still landing is dropped (the
+  // history is busy); its focus landing is the end of it.
+  await expect(page.locator(".node-text:focus")).toHaveCount(1);
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(() => order(page, 0)).toEqual(["a1", "a2", "a3"]);
   await expect.poll(() => order(page, 1)).toEqual(["b1", "b2"]);
