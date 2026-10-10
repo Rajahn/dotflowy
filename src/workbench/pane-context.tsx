@@ -8,8 +8,9 @@ import { DEFAULT_PANE_ID } from "../data/panes";
  * the command bridge and selection fill; `windowScroll` says whether the
  * window scrolls the outline (narrow screens) or the pane root does
  * (pane-scroll.ts). The default is the single pane every layout starts with,
- * so a component rendered outside a provider (a test harness) behaves as
- * before.
+ * scrolled by its pane root -- so a component rendered outside a provider (a
+ * test harness) needs a `[data-pane-scroll]` ancestor, or a provider with
+ * `windowScroll`.
  */
 export interface PaneContextValue {
   paneId: string;

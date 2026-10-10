@@ -34,9 +34,9 @@ interface VirtualNav {
    * Consumers must NOT add scrollMargin again.
    */
   measurementAt: (index: number) => { start: number; size: number } | undefined;
-  /** A measurement's `start` converted to a viewport (client) y, accounting
-   *  for whoever scrolls the list: the window, or the pane root. */
-  viewportTop: (start: number) => number;
+  /** The client y of content y = 0 for whoever scrolls the list (the window,
+   *  or the pane root): `start + contentTop()` is a viewport y. Read live. */
+  contentTop: () => number;
 }
 
 const navs = new Map<string, VirtualNav>();
@@ -55,12 +55,15 @@ export function setVirtualNav(paneId: string, next: VirtualNav): () => void {
  * The viewport rect (top/height) of a visible row from the virtualizer's
  * measurements, NOT the DOM -- so an off-screen drop target during a drag still
  * has geometry (estimated until it renders). The scroll offset is read at call
- * time (auto-scroll re-projects after each step). Null when virtual nav is
+ * time (auto-scroll re-projects after each step) -- pass `contentTop` from
+ * {@link virtualContentTop} when rect-ing many rows in one frame, so the
+ * scroller's offset is read once, not per row. Null when virtual nav is
  * inactive or the id isn't a visible row. See use-drag-reorder.ts (ADR 0019).
  */
 export function virtualRowRect(
   id: string,
   paneId: string = getActivePaneId(),
+  contentTop?: number,
 ): { top: number; height: number } | null {
   const nav = navs.get(paneId);
   if (!nav) return null;
@@ -68,7 +71,15 @@ export function virtualRowRect(
   if (i < 0) return null;
   const m = nav.measurementAt(i);
   if (!m) return null;
-  return { top: nav.viewportTop(m.start), height: m.size };
+  return { top: m.start + (contentTop ?? nav.contentTop()), height: m.size };
+}
+
+/** `paneId`'s live content origin (see {@link VirtualNav.contentTop}), or null
+ *  when its windowed list isn't mounted. */
+export function virtualContentTop(
+  paneId: string = getActivePaneId(),
+): number | null {
+  return navs.get(paneId)?.contentTop() ?? null;
 }
 
 /**

@@ -219,7 +219,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
     // Only a narrow screen scrolls the page; a wide one scrolls each workbench
     // pane, which reserves its own gutter (docs/workbench/PLAN.md 2.3).
-    <html lang="en" className="max-md:[scrollbar-gutter:stable]">
+    <html lang="en" className="max-[768px]:[scrollbar-gutter:stable]">
       <head>
         {/* SVG tab icon — theme-swapped in place by noFlashThemeScript. */}
         <link

@@ -69,7 +69,7 @@ import {
   toggleCompleted,
 } from "../data/mutations";
 import { flattenNodeText } from "../data/node-links";
-import { contentY, scrollerOf } from "../data/pane-scroll";
+import { contentOrigin, contentY, scrollerOf } from "../data/pane-scroll";
 import { paneElement, useIsActivePane } from "../data/panes";
 import { appRuntime } from "../data/runtime";
 import { bootstrapOutline } from "../data/seed";
@@ -927,14 +927,12 @@ export function OutlineEditor({ rootId }: OutlineEditorProps) {
         scrollToIndex: (i, opts) => virtualizer.scrollToIndex(i, opts),
         indexOf: (id) => rowIndexRef.current.get(id) ?? -1,
         measurementAt: (i) => virtualizer.measurementsCache[i],
-        viewportTop: (start) => {
-          const scroller = scrollerOf(listRef.current);
-          return scroller
-            ? start - scroller.scrollTop + scroller.getBoundingClientRect().top
-            : start - window.scrollY;
-        },
+        // The scroll mode is the pane's, not whatever the DOM shows right now
+        // (the list ref is null while loading).
+        contentTop: () =>
+          contentOrigin(windowScroll ? null : scrollerOf(listRef.current)),
       }),
-    [paneId, virtualizer],
+    [paneId, virtualizer, windowScroll],
   );
 
   // Deep-linked to a node that no longer exists (and the store has loaded).

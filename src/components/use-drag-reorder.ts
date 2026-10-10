@@ -12,7 +12,7 @@ import { isMirrorsEnabled } from "../data/flags";
 import { scrollByY, scrollViewport, scrollerOf } from "../data/pane-scroll";
 import { getSelectionDragSet } from "../data/selection-fill";
 import { type Node, type TreeIndex } from "../data/tree";
-import { virtualRowRect } from "../data/virtual-nav";
+import { virtualContentTop, virtualRowRect } from "../data/virtual-nav";
 import {
   buildVisibleRows,
   instanceIdForKey,
@@ -332,9 +332,11 @@ export function useDragReorder(deps: DragDeps) {
     const listEl = depsRef.current.getListEl();
     const listRect = listEl?.getBoundingClientRect();
     const paneId = depsRef.current.paneId;
+    // The scroller's offset, read once per projection rather than per row.
+    const contentTop = virtualContentTop(paneId) ?? undefined;
     const pairs: { row: Row; rect: RowRect }[] = [];
     for (const r of s.rows) {
-      const vr = virtualRowRect(r.key, paneId);
+      const vr = virtualRowRect(r.key, paneId, contentTop);
       if (!vr) continue;
       // Uniform indent: depth-0 left is the container left; deeper rows add
       // depth * indent (OutlineRow's paddingInlineStart). project() backs

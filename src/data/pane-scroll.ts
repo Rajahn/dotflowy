@@ -58,6 +58,12 @@ export function contentY(
   scroller: HTMLElement | null,
   clientY: number,
 ): number {
-  if (!scroller) return clientY + window.scrollY;
-  return clientY - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  return clientY - contentOrigin(scroller);
+}
+
+/** The client y of scroll-content y = 0 (the inverse of {@link contentY}):
+ *  a content-space y plus this is a viewport y. */
+export function contentOrigin(scroller: HTMLElement | null): number {
+  if (!scroller) return -window.scrollY;
+  return scroller.getBoundingClientRect().top - scroller.scrollTop;
 }
