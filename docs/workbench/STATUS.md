@@ -4,7 +4,7 @@
 
 ## 下一步
 
-P4（Library 与侧栏）：分支 `workbench/p4-library`。P4–P9 已写好并各自经过 /code-review 修复，按顺序叠在 P3 之上（每期一个分支），逐期 rebase 到 main、跑全量门槛、开 PR、合并。
+P5（多列布局与页签界面）：分支 `workbench/p5-tabs`。P5–P9 已写好并各自经过 /code-review 修复，按顺序叠在 P4 之上，逐期 rebase 到 main、跑全量门槛、开 PR、合并。
 
 ## 分期进度
 
@@ -14,7 +14,7 @@ P4（Library 与侧栏）：分支 `workbench/p4-library`。P4–P9 已写好并
 | P1  | PaneContext（行为不变）     | 完成   | #2      | 门槛见下方"P1 门槛"              |
 | P2  | 每列独立滚动                | 完成   | 见本 PR | 宽屏列内滚动；窄屏保留窗口滚动   |
 | P3  | 缩放与 URL 解耦、页签模型   | 完成   | 见本 PR | 页签持有缩放根；URL 映射活动页签 |
-| P4  | Library 与侧栏              | 未开始 |         |                                  |
+| P4  | Library 与侧栏              | 完成   | 见本 PR | 文件夹/笔记；新 Seam S           |
 | P5  | 多列布局与页签界面          | 未开始 |         |                                  |
 | P6  | 跨列拖拽与复制              | 未开始 |         |                                  |
 | P7  | 键盘移动、移动到…、撤销回位 | 未开始 |         |                                  |
@@ -80,6 +80,13 @@ P4（Library 与侧栏）：分支 `workbench/p4-library`。P4–P9 已写好并
 ### P3 门槛
 
 全部静态门槛通过。最终提交的全量 e2e 497/507；10 条失败里 `week-calendar:461` 是已知环境问题，其余 9 条单独重跑全部通过（首屏超时类负载抖动）。期间修了两处由本期引起的真问题：编辑器在同步前挂载时 `scrollMargin` 只在挂载时量一次、量不到列表，导致虚拟行坐标整体偏一个页眉高度、拖放落到指针下方两行（`drag-reorder`、`drag-filtered`、`spotlight` 移动端）；以及骨架淡入期间量坐标的测试时序（`completion-transition`）。/code-review 提出 10 条：修了 9 条（`?q=` 用路由自己的 search 解析、缩放在过渡回调里再计算、首屏前解析 URL、只切活动列时也改写 URL、非缩放重挂载恢复滚动、浏览器前进后退按缩放进出落焦点、无需重挂载时 focus-last 立即落、撤销只切页签时 replace、工作台自带错误边界），1 条记入"需要决定"。新增 e2e `workbench-url.spec.ts`。
+
+### P4 门槛
+
+全部静态门槛通过。全量 e2e 503/508；`week-calendar:461`、`undo-redo:527` 是基线已知失败，`emphasis:184`、`highlight:266` 单独重跑通过，`workbench-library` 的失败是测试定位器不精确（"Roadmap" 同时匹配到 "Roadmap options" 按钮），改为精确匹配后通过。/code-review 提出 10 条：修了 9 条（重命名笔记改写源文本且不变不写、删除笔记在守卫通过后才退出缩放、新建笔记回滚时删掉 library 行、拖放按绘制所在文件夹、展开文件夹下方落为首个子项、并列 rank 的插入、一次遍历处理文件夹环、Seam S 增加 `changed()`、重复的删除条件），1 条（Sidebar 重复订阅）不改。
+
+- **新插件 Seam S（`sidebarEntries`）**（P4）：按授权豁免 /grill-with-docs，人工对照 ADR 0001（新 seam 要有类型契约、在 docs/plugins.md 登记、可选特性随特性退出）。已登记，Daily 是首个使用者。
+- **笔记行在节点不再是顶层时隐藏而不删除**（P4，ADR 0070）：撤销删除或把节点移回顶层时笔记回到原位；代价是 library 里可能积累隐藏行。倾向维持。
 
 ## 偏离方案记录
 

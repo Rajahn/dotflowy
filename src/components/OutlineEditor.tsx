@@ -356,7 +356,20 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
     pivotAtMount: intent?.pivotId ?? null,
   });
   useEffect(() => {
-    if (intent) consumeZoomIntent(intent);
+    if (!intent) return;
+    // A new note opens with its title selected, ready to be named.
+    const title = intent.selectTitle && rootId ? refs.get(rootId) : null;
+    if (title) {
+      title.focus();
+      const range = document.createRange();
+      range.selectNodeContents(title);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+    consumeZoomIntent(intent);
+    // Mount-only: the intent is fixed for this view (captured at mount).
+    // eslint-disable-next-line react-doctor/exhaustive-deps
   }, [intent]);
 
   // Undo, redo and zoom-out are window chords the workbench host registers

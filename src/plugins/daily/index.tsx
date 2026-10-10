@@ -70,6 +70,7 @@ import {
 import {
   DAILY_CONTAINER_TEXT,
   formatDayBadge,
+  getContainerId,
   formatDayRelative,
   getKeyForNode,
   getMappedId,
@@ -374,6 +375,30 @@ export default definePlugin({
     {
       id: "daily-today",
       render: (getCtx) => <TodayButton getCtx={getCtx} />,
+    },
+  ],
+
+  // Seam S: the Daily container as a fixed workbench sidebar entry
+  // (docs/workbench/PLAN.md 1.2). Opening it before the container exists
+  // creates today's note (seed-free), which creates the container with it.
+  sidebarEntries: [
+    {
+      id: "daily-container",
+      label: DAILY_CONTAINER_TEXT,
+      icon: CalendarDaysIcon,
+      nodeId: getContainerId,
+      changed: subscribeDailyIndex,
+      open: (open) => {
+        const existing = getContainerId();
+        if (existing) {
+          open(existing);
+          return;
+        }
+        void getOrCreateDay(localDateKey()).then(() => {
+          const container = getContainerId();
+          if (container) open(container);
+        });
+      },
     },
   ],
 

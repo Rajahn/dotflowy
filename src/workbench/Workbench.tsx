@@ -8,6 +8,7 @@ import { useIsMobile } from "../hooks/use-mobile";
 import { activeTabOf } from "./model";
 import { dispatchPaneAction } from "./pane-actions";
 import { PaneProvider } from "./pane-context";
+import { Sidebar } from "./Sidebar";
 import { useWorkbenchState } from "./store";
 import { useWorkbenchUrlSync } from "./url-sync";
 
@@ -26,40 +27,46 @@ export function Workbench() {
   // pane root on its own.
   const windowScroll = useIsMobile();
   useWorkbenchUrlSync();
+  const panesView = panes.map((pane) => {
+    const tab = activeTabOf(pane);
+    return (
+      <PaneProvider key={pane.id} paneId={pane.id} windowScroll={windowScroll}>
+        <main
+          data-pane-id={pane.id}
+          data-pane-scroll={windowScroll ? undefined : ""}
+          className={
+            windowScroll
+              ? undefined
+              : "h-dvh min-w-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto"
+          }
+        >
+          {/* Key by tab and zoom root so each zoom view mounts a fresh
+              editor (and a fresh title element; prevents a suppressed
+              view-transition-name from leaking between consecutive zooms),
+              and by the scroll mode, which the editor's virtualizer fixes at
+              mount. */}
+          <OutlineEditor
+            key={`${tab.id}:${tab.rootId ?? ""}:${windowScroll}`}
+            tabId={tab.id}
+            rootId={tab.rootId}
+          />
+        </main>
+      </PaneProvider>
+    );
+  });
   return (
     <>
       <WorkbenchHost />
-      {panes.map((pane) => {
-        const tab = activeTabOf(pane);
-        return (
-          <PaneProvider
-            key={pane.id}
-            paneId={pane.id}
-            windowScroll={windowScroll}
-          >
-            <main
-              data-pane-id={pane.id}
-              data-pane-scroll={windowScroll ? undefined : ""}
-              className={
-                windowScroll
-                  ? undefined
-                  : "h-dvh [scrollbar-gutter:stable] overflow-y-auto"
-              }
-            >
-              {/* Key by tab and zoom root so each zoom view mounts a fresh
-                  editor (and a fresh title element; prevents a suppressed
-                  view-transition-name from leaking between consecutive
-                  zooms), and by the scroll mode, which the editor's
-                  virtualizer fixes at mount. */}
-              <OutlineEditor
-                key={`${tab.id}:${tab.rootId ?? ""}:${windowScroll}`}
-                tabId={tab.id}
-                rootId={tab.rootId}
-              />
-            </main>
-          </PaneProvider>
-        );
-      })}
+      {windowScroll ? (
+        // A narrow screen is one page-scrolling column (the sidebar becomes a
+        // drawer there; docs/workbench/PLAN.md 1.9).
+        panesView
+      ) : (
+        <div className="flex h-dvh overflow-hidden">
+          <Sidebar />
+          {panesView}
+        </div>
+      )}
     </>
   );
 }

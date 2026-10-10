@@ -490,6 +490,33 @@ export interface HeaderSlotSpec {
   render(getCtx: () => PluginContext): ReactNode;
 }
 
+// --- Seam S: workbench sidebar entries --------------------------------------
+//
+// A fixed entry at the top of the workbench sidebar for a node a plugin owns
+// (the Daily container), shown above the library's folders and notes
+// (docs/workbench/PLAN.md 1.2). The sidebar is core chrome and never imports a
+// plugin, so the entry comes through this seam. The node an entry owns is left
+// out of the sidebar's "Unfiled" list -- it already has its own row.
+
+export interface SidebarEntrySpec {
+  id: string;
+  /** The row's label, e.g. "Daily". */
+  label: string;
+  /** Leading icon (a className-taking component, like CommandSpec.icon). */
+  icon: ComponentType<{ className?: string }>;
+  /** The node the entry opens, or null while it doesn't exist yet. A live
+   *  read; the sidebar re-reads it when it renders and on `changed`. */
+  nodeId(): string | null;
+  /** Subscribe to changes in `nodeId()` (an async index resolving after the
+   *  outline), returning an unsubscribe. Omit when `nodeId` is static. The
+   *  sidebar keeps the entry's node out of Unfiled with it, so a plugin node
+   *  that resolves late is never shown as fileable. */
+  changed?(cb: () => void): () => void;
+  /** Open the entry in the active pane: resolve (or create) its node and call
+   *  `open` with it. */
+  open(open: (nodeId: string) => void): void;
+}
+
 // --- Protected nodes --------------------------------------------------------
 //
 // A plugin marks a node protected (`protects`); the CORE owns what that means
@@ -726,6 +753,8 @@ export interface PluginDef {
   subheaderSlots?: SubheaderSlotSpec[];
   /** Seam M: plugin-owned DOM controls that accept a structural bullet drop. */
   externalDropTargets?: ExternalDropTargetSpec[];
+  /** Seam S: fixed workbench sidebar entries (the Daily container). */
+  sidebarEntries?: SidebarEntrySpec[];
   /** Protected nodes: mark `nodeId` protected (the daily container is the first
    *  consumer). Return `false` to allow, or `true` / a {@link NodeProtection} to
    *  protect. `true` is enough -- the core enforces every rule (no delete / blank
