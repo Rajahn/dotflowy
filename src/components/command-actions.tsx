@@ -1,4 +1,3 @@
-import { useParams } from "@tanstack/react-router";
 import {
   ALargeSmallIcon,
   BookmarkIcon,
@@ -31,6 +30,7 @@ import { openFeedbackReport } from "../data/feedback";
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
 import { signOutAndReload } from "../lib/auth-client";
+import { useActivePaneRootId } from "../workbench/hooks";
 import { openChangelog } from "./changelog-opener";
 import {
   copyOutlineAsMarkdown,
@@ -70,7 +70,8 @@ export function useGlobalActions(opts: {
   const { showCompleted, setShowCompleted } = useShowCompleted();
   const spotlight = useSpotlightEnabled();
   const { index } = useTree();
-  const rootId = useParams({ strict: false }).nodeId ?? null;
+  // The active pane's zoom root: Cmd+K acts on the pane that had focus.
+  const rootId = useActivePaneRootId();
   const rootNode = rootId ? (index.byId.get(rootId) ?? null) : null;
   const history = useHistoryState();
 

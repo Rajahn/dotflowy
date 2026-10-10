@@ -76,3 +76,8 @@ clears history and refreshes server truth instead of claiming nothing changed.
 Draft consolidation folds contiguous steps. If an independent outline action
 interrupts drafting, that action remains a separate undo step in its original
 order; consolidation must not rewind it along with the draft.
+
+**Amended by [ADR 0069](./0069-pane-owned-view-root-and-workbench-urls.md).** "Return to the
+editing location" now means the workbench pane and tab of the edit: a history entry records them,
+and a restore shows that tab again (zoomed to the entry's root) while it is open, else the active
+pane.

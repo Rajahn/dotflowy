@@ -15,7 +15,6 @@
 // palette. Account Calendar-week truth stays in date-links.ts -- this file adds
 // no parallel week math.
 
-import { useParams } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { useReducedMotion } from "motion/react";
@@ -44,6 +43,7 @@ import {
   weekLabel,
 } from "../../data/date-links";
 import { useEditorFeatures } from "../../data/editor-features";
+import { usePaneRootId } from "../../workbench/hooks";
 import { useScaffoldKey } from "./daily-index";
 import { useDaysWithContent } from "./days-with-content";
 import { getOrCreateDay } from "./get-or-create";
@@ -68,8 +68,8 @@ let latestSelectionRequest = 0;
 
 export function WeekCalendar({ getCtx }: { getCtx: () => PluginContext }) {
   const { weekStart } = useEditorFeatures();
-  const params = useParams({ strict: false });
-  const rootId = params.nodeId ?? null;
+  // This pane's zoom root (each workbench pane has its own view).
+  const rootId = usePaneRootId();
   // Reactive: the zoom root's scaffold key (null unless it maps to a scaffold
   // node). The strip only shows for a DAY -- week/month/year/container pages and
   // non-daily pages get nothing ("which day is selected?" has no answer there).

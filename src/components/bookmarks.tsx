@@ -1,8 +1,8 @@
-import { useParams } from "@tanstack/react-router";
 import { BookmarkIcon } from "lucide-react";
 
 import { toggleBookmark } from "../data/mutations";
 import { useTree } from "../data/useTree";
+import { usePaneRootId } from "../workbench/hooks";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
 
@@ -25,8 +25,8 @@ import { Separator } from "./ui/separator";
  */
 export function BookmarkStar() {
   const { index } = useTree();
-  // Loose params: `nodeId` is present on /$nodeId, absent on / (home).
-  const rootId = useParams({ strict: false }).nodeId ?? null;
+  // This pane's zoom root (null at the top).
+  const rootId = usePaneRootId();
   const current = rootId ? (index.byId.get(rootId) ?? null) : null;
   if (!current) return null;
 

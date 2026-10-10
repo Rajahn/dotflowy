@@ -90,3 +90,9 @@ landed and the non-obvious calls:
 - **Collapse/expand is instant** (no height-slide): the flat list drops collapsed descendants
   entirely, so the grid-rows animation can't survive — matches Workflowy/Roam (decided with Cam).
   Node multi-selection now tints **full-width** rows rather than indented ones (same reason).
+
+**Amended by [ADR 0069](./0069-pane-owned-view-root-and-workbench-urls.md).** On wide screens
+each workbench pane root scrolls on its own, so the list virtualizes over that element
+(`useVirtualizer`, `scrollMargin` measured from the pane's content top); narrow screens keep the
+window virtualizer. Geometry consumers (virtual nav, drag, spotlight) resolve the scroller through
+`src/data/pane-scroll.ts`.

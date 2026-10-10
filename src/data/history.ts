@@ -9,6 +9,11 @@ import { instanceIdForKey } from "./visible-order";
 
 export interface HistoryLocation {
   rootId: string | null;
+  /** The workbench pane and tab the edit happened in (docs/workbench/PLAN.md
+   *  2.8). A restore returns there while that tab is open, else to the active
+   *  pane. Absent on entries captured outside the workbench (quick-add). */
+  paneId?: string;
+  tabId?: string;
   rowKey: string | null;
   caret: { start: number; end: number } | null;
   selection: { anchorId: string; focusId: string } | null;

@@ -5,53 +5,61 @@ import { OutlineEditor } from "../components/OutlineEditor";
 import { installLiteralPasteArm } from "../components/paste";
 import { paneIdOf, setActivePaneId } from "../data/panes";
 import { useIsMobile } from "../hooks/use-mobile";
+import { activeTabOf } from "./model";
 import { dispatchPaneAction } from "./pane-actions";
 import { PaneProvider } from "./pane-context";
 import { useWorkbenchState } from "./store";
+import { useWorkbenchUrlSync } from "./url-sync";
 
 /**
  * The workbench: every pane (column) of the layout, each an `OutlineEditor`
  * inside its own `PaneProvider` and `[data-pane-id]` root, plus the window-
  * level wiring that must exist once per page, not once per editor
- * (docs/workbench/PLAN.md 2.2). Today the layout holds a single pane and the
- * route still owns its zoom root.
+ * (docs/workbench/PLAN.md 2.2). Mounted by the root route for `/` and
+ * `/$nodeId` and kept mounted across them, so a zoom never remounts a column
+ * it did not change. Each pane's view comes from its active tab (store.ts);
+ * the URL follows the active tab (url-sync.ts).
  */
-export function Workbench({ rootId }: Readonly<{ rootId: string | null }>) {
+export function Workbench() {
   const { panes } = useWorkbenchState();
   // Narrow screens keep page scrolling (pane-scroll.ts); wide ones scroll each
   // pane root on its own.
   const windowScroll = useIsMobile();
+  useWorkbenchUrlSync();
   return (
     <>
       <WorkbenchHost />
-      {panes.map((pane) => (
-        <PaneProvider
-          key={pane.id}
-          paneId={pane.id}
-          windowScroll={windowScroll}
-        >
-          <main
-            data-pane-id={pane.id}
-            data-pane-scroll={windowScroll ? undefined : ""}
-            data-scroll-restoration-id={windowScroll ? undefined : pane.id}
-            className={
-              windowScroll
-                ? undefined
-                : "h-dvh [scrollbar-gutter:stable] overflow-y-auto"
-            }
+      {panes.map((pane) => {
+        const tab = activeTabOf(pane);
+        return (
+          <PaneProvider
+            key={pane.id}
+            paneId={pane.id}
+            windowScroll={windowScroll}
           >
-            {/* Key by the zoom root so each zoom view mounts a fresh editor
-                (and a fresh title element; prevents a suppressed
-                view-transition-name from leaking between consecutive
-                zooms), and by the scroll mode, which the editor's
-                virtualizer fixes at mount. */}
-            <OutlineEditor
-              key={`${rootId ?? ""}:${windowScroll}`}
-              rootId={rootId}
-            />
-          </main>
-        </PaneProvider>
-      ))}
+            <main
+              data-pane-id={pane.id}
+              data-pane-scroll={windowScroll ? undefined : ""}
+              className={
+                windowScroll
+                  ? undefined
+                  : "h-dvh [scrollbar-gutter:stable] overflow-y-auto"
+              }
+            >
+              {/* Key by tab and zoom root so each zoom view mounts a fresh
+                  editor (and a fresh title element; prevents a suppressed
+                  view-transition-name from leaking between consecutive
+                  zooms), and by the scroll mode, which the editor's
+                  virtualizer fixes at mount. */}
+              <OutlineEditor
+                key={`${tab.id}:${tab.rootId ?? ""}:${windowScroll}`}
+                tabId={tab.id}
+                rootId={tab.rootId}
+              />
+            </main>
+          </PaneProvider>
+        );
+      })}
     </>
   );
 }

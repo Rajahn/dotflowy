@@ -1,14 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { validateOutlineSearch } from "../data/tags";
-import { Workbench } from "../workbench/Workbench";
 
+// The outline zoomed into one bullet. Rendered by the root route's workbench,
+// which projects its active tab onto this URL; see routes/index.tsx.
 export const Route = createFileRoute("/$nodeId")({
-  component: ZoomedPage,
+  component: () => null,
   validateSearch: validateOutlineSearch,
 });
-
-function ZoomedPage() {
-  const { nodeId } = Route.useParams();
-  return <Workbench rootId={nodeId} />;
-}
