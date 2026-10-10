@@ -904,7 +904,9 @@ export function OutlineEditor({ tabId, rootId }: OutlineEditorProps) {
     const ro = new ResizeObserver(measure);
     ro.observe(header);
     return () => ro.disconnect();
-  }, [rootId, zoomedNode?.id]);
+    // `loading`: an editor mounted before the outline synced renders the
+    // skeleton first; the list (and its margin) exists only once it ends.
+  }, [rootId, zoomedNode?.id, loading]);
   const useListVirtualizer = windowScroll
     ? useWindowListVirtualizer
     : usePaneListVirtualizer;
