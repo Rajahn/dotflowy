@@ -84,3 +84,8 @@ export function rememberPaneFocus(paneId: string, rowKey: string): void {
 export function getPaneFocus(paneId: string): string | null {
   return lastFocused.get(paneId) ?? null;
 }
+
+/** Drop a closed pane's remembered row (a later pane may reuse its id). */
+export function forgetPaneFocus(paneId: string): void {
+  lastFocused.delete(paneId);
+}

@@ -75,10 +75,18 @@ export function useWorkbenchUrlSync(): void {
 
     // Project the active tab onto the URL when they disagree.
     const write = () => {
-      const tab = activeTab(getWorkbenchState(), getActivePaneId());
+      // An empty column (its last tab closed) shows the top-level URL, so a
+      // reload doesn't reopen the note that was closed.
+      const tab: TabView = activeTab(
+        getWorkbenchState(),
+        getActivePaneId(),
+      ) ?? {
+        rootId: null,
+        q: "",
+      };
       const current = parse(router.history.location);
       const mode = takeUrlWriteMode();
-      if (!tab || !current) return;
+      if (!current) return;
       if (urlShowsView(current.nodeId, current.search, tab)) return;
       writeToken += 1;
       const common = {

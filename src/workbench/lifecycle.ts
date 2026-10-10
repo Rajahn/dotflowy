@@ -59,23 +59,33 @@ export function useWorkbenchLifecycle(): void {
   useEffect(() => {
     if (!userId) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const save = () => {
+      timer = null;
+      saveLayout(
+        userId,
+        toSaved(getWorkbenchState(), getActivePaneId(), getSidebarState()),
+      );
+    };
     const schedule = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        saveLayout(
-          userId,
-          toSaved(getWorkbenchState(), getActivePaneId(), getSidebarState()),
-        );
-      }, SAVE_DELAY_MS);
+      timer = setTimeout(save, SAVE_DELAY_MS);
+    };
+    // A pending save is written, not dropped, when the page goes away or the
+    // workbench unmounts (another route, an error reset).
+    const flush = () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      save();
     };
     const offs = [
       subscribeWorkbench(schedule),
       subscribeActivePane(schedule),
       subscribeSidebar(schedule),
     ];
+    window.addEventListener("pagehide", flush);
     return () => {
-      if (timer) clearTimeout(timer);
+      window.removeEventListener("pagehide", flush);
+      flush();
       for (const off of offs) off();
     };
   }, [userId]);

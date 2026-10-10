@@ -8,6 +8,7 @@ import {
   moveTab,
   openTab,
   pinTab,
+  setPaneWidths,
   splitPane,
   resolveUrlChange,
   tabBack,
@@ -346,4 +347,35 @@ test("a deep link reuses the untouched default tab, never a used one", () => {
     kind: "open",
     paneId: "a",
   });
+});
+
+test("moving a tab into a column already showing its view focuses that tab instead", () => {
+  const state: WorkbenchState = {
+    panes: [
+      {
+        id: "a",
+        tabs: [tab("t1", "A"), tab("t2", "X")],
+        activeTabId: "t1",
+        width: 1,
+      },
+      {
+        id: "b",
+        tabs: [tab("t3", "X"), tab("t4", "Y")],
+        activeTabId: "t4",
+        width: 1,
+      },
+    ],
+  };
+  const moved = moveTab(state, "t2", "b", null);
+  expect(moved.panes[0]!.tabs.map((t) => t.id)).toEqual(["t1"]);
+  expect(moved.panes[1]!.tabs.map((t) => t.id)).toEqual(["t3", "t4"]);
+  expect(moved.panes[1]!.activeTabId).toBe("t3");
+});
+
+test("setPaneWidths keeps the same state when nothing changes", () => {
+  const state: WorkbenchState = {
+    panes: [{ id: "a", tabs: [tab("t1", "A")], activeTabId: "t1", width: 2 }],
+  };
+  expect(setPaneWidths(state, new Map([["a", 2]]))).toBe(state);
+  expect(setPaneWidths(state, new Map([["a", 3]])).panes[0]!.width).toBe(3);
 });

@@ -194,7 +194,9 @@ function PaneView({
         onDragOver={(e) => {
           if (!hasLibraryDrag(e)) return;
           e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
+          // Must be one the drag allows (startLibraryDrag: move), or the
+          // browser refuses the drop.
+          e.dataTransfer.dropEffect = "move";
           setDropping(true);
         }}
         onDragLeave={(e) => {
@@ -569,7 +571,14 @@ function onWorkbenchKey(e: KeyboardEvent): boolean {
   const mac = isMac();
   const onlyCtrl = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
   const onlyAlt = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
-  const ctrlAlt = e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey;
+  // AltGr on Windows reports Ctrl+Alt: leave it to type its character
+  // ([, ], ~ on several European layouts).
+  const ctrlAlt =
+    e.ctrlKey &&
+    e.altKey &&
+    !e.metaKey &&
+    !e.shiftKey &&
+    !e.getModifierState("AltGraph");
   const digit = /^Digit([1-4])$/.exec(e.code);
   if (digit && (mac ? onlyCtrl : onlyAlt)) {
     focusPaneAt(Number(digit[1]) - 1);
@@ -608,12 +617,19 @@ function onWorkbenchKey(e: KeyboardEvent): boolean {
 function WorkbenchHost() {
   const activePaneId = useActivePaneId();
   const previousPane = useRef(activePaneId);
+  // A press inside a column's content (a row, empty space, its scrollbar)
+  // places focus itself, or deliberately none: the caret must not jump.
+  const pressedContent = useRef<string | null>(null);
 
   useEffect(() => {
     const follow = (e: Event) => {
       const target = e.target instanceof Element ? e.target : null;
       const paneId = paneIdOf(target);
       if (!paneId) return;
+      if (e.type === "pointerdown")
+        pressedContent.current = target?.closest("[data-pane-scroll]")
+          ? paneId
+          : null;
       setActivePaneId(paneId);
       const key =
         e.type === "focusin" &&
@@ -647,6 +663,9 @@ function WorkbenchHost() {
   useEffect(() => {
     if (previousPane.current === activePaneId) return;
     previousPane.current = activePaneId;
+    const pressed = pressedContent.current === activePaneId;
+    pressedContent.current = null;
+    if (pressed) return;
     if (paneIdOf(document.activeElement) === activePaneId) return;
     if (document.querySelector('[role="dialog"]')) return;
     focusPaneEditor(activePaneId);

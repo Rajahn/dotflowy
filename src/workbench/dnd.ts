@@ -22,7 +22,13 @@ const decodeLibraryDrag = Schema.decodeUnknownOption(
   Schema.fromJsonString(LibraryDragSchema),
 );
 
-const TabDragSchema = Schema.Struct({ tabId: Schema.String });
+const TabDragSchema = Schema.Struct({
+  tabId: Schema.String,
+  page: Schema.String,
+});
+/** Tab ids are per page (t1, t2, ...), so a tab dragged in from another
+ *  window must not match one here: the payload names its page. */
+const PAGE = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 const decodeTabDrag = Schema.decodeUnknownOption(
   Schema.fromJsonString(TabDragSchema),
 );
@@ -46,7 +52,7 @@ export function readLibraryDrag(e: DragEvent): LibraryDrag | null {
 export function startTabDrag(e: DragEvent, tabId: string): void {
   e.stopPropagation();
   e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData(TAB_TYPE, JSON.stringify({ tabId }));
+  e.dataTransfer.setData(TAB_TYPE, JSON.stringify({ tabId, page: PAGE }));
 }
 
 export function hasTabDrag(e: DragEvent): boolean {
@@ -55,6 +61,8 @@ export function hasTabDrag(e: DragEvent): boolean {
 
 export function readTabDrag(e: DragEvent): string | null {
   return Option.getOrNull(
-    Option.map(decodeTabDrag(e.dataTransfer.getData(TAB_TYPE)), (d) => d.tabId),
+    Option.flatMap(decodeTabDrag(e.dataTransfer.getData(TAB_TYPE)), (d) =>
+      d.page === PAGE ? Option.some(d.tabId) : Option.none(),
+    ),
   );
 }

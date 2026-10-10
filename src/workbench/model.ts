@@ -469,6 +469,15 @@ export function moveTab(
   const to = findPane(state, toPaneId);
   const tab = from?.tabs.find((t) => t.id === tabId);
   if (!from || !to || !tab || tabId === beforeTabId) return state;
+  // The target column already shows that root: focus its tab instead of
+  // holding the same view twice (the moved tab closes).
+  const twin =
+    from.id === toPaneId
+      ? undefined
+      : to.tabs.find(
+          (t) => t.rootId === tab.rootId && t.q === tab.q && t.id !== tab.id,
+        );
+  if (twin) return focusTab(closeTab(state, tabId), toPaneId, twin.id);
   let panes = state.panes.map((p) => {
     if (p.id !== from.id) return p;
     const tabs = p.tabs.filter((t) => t.id !== tabId);
@@ -510,12 +519,11 @@ export function setPaneWidths(
   state: WorkbenchState,
   widths: ReadonlyMap<string, number>,
 ): WorkbenchState {
-  return {
-    panes: state.panes.map((p) => {
-      const w = widths.get(p.id);
-      return w !== undefined && w > 0 && w !== p.width ? { ...p, width: w } : p;
-    }),
-  };
+  const panes = state.panes.map((p) => {
+    const w = widths.get(p.id);
+    return w !== undefined && w > 0 && w !== p.width ? { ...p, width: w } : p;
+  });
+  return panes.every((p, i) => p === state.panes[i]) ? state : { panes };
 }
 
 // --- URL shape --------------------------------------------------------------

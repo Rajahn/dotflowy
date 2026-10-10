@@ -5,6 +5,7 @@ import { getNodeActionBridge } from "../data/command-bridge";
 import { setCaptureListener } from "../data/history";
 import {
   DEFAULT_PANE_ID,
+  forgetPaneFocus,
   getActivePaneId,
   setActivePaneId,
 } from "../data/panes";
@@ -89,6 +90,7 @@ function commit(next: WorkbenchState): void {
     if (next.panes.some((p) => p.id === pane.id)) continue;
     forgetPaneView(pane.id);
     forgetSelectionFillPane(pane.id);
+    forgetPaneFocus(pane.id);
   }
   if (!next.panes.some((p) => p.id === getActivePaneId())) {
     const fallback = next.panes[0];
@@ -105,14 +107,13 @@ const RECENT_MAX = 8;
 let recent: string[] = [];
 
 function noteRecent(next: WorkbenchState): void {
-  let changed = false;
-  for (const pane of next.panes) {
-    const root = activeTabOf(pane)?.rootId;
-    if (!root || recent[0] === root) continue;
-    recent = [root, ...recent.filter((id) => id !== root)].slice(0, RECENT_MAX);
-    changed = true;
-  }
-  if (changed) for (const l of recentListeners) l();
+  // The active column is where things are being opened; the others only
+  // keep showing what they showed.
+  const pane = next.panes.find((p) => p.id === getActivePaneId());
+  const root = pane ? activeTabOf(pane)?.rootId : null;
+  if (!root || recent[0] === root) return;
+  recent = [root, ...recent.filter((id) => id !== root)].slice(0, RECENT_MAX);
+  for (const l of recentListeners) l();
 }
 
 const recentListeners = new Set<() => void>();

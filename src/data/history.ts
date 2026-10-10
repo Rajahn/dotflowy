@@ -239,11 +239,13 @@ export function capture(
     return;
   }
   lastCaptureRefused = false;
-  captureListener?.(options.location ?? null);
+  // The location the edit happened at, as the entry records it: a write the
+  // caller didn't place (most of them) is read from the focused row.
+  const location = options.location ?? readLocation?.(focusId) ?? null;
+  captureListener?.(location);
 
   const top = undoStack[undoStack.length - 1];
   if (tag !== null && top && top.tag === tag && redoStack.length === 0) return;
-  const location = options.location ?? readLocation?.(focusId) ?? null;
   undoStack.push({
     nodes: snapshot(index),
     focusId: location?.rowKey ?? focusId,
