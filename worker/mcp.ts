@@ -175,7 +175,14 @@ type RpcResult =
 
 function publishedSchema(schema: Schema.Top): EffectJsonSchema.JsonSchema {
   const doc = Schema.toJsonSchemaDocument(schema);
-  const jsonSchema = { ...doc.schema };
+  // MCP requires `type: "object"` on every tool schema, and a strict client
+  // drops the WHOLE tools/list when one entry lacks it. Effect renders an empty
+  // Struct (list_library's input) as "any non-null value"
+  // (`{ not: { type: "null" } }`), so publish that as an empty object instead.
+  const jsonSchema: EffectJsonSchema.JsonSchema =
+    doc.schema.type === "object"
+      ? { ...doc.schema }
+      : { type: "object", properties: {} };
   if (Object.keys(doc.definitions).length)
     jsonSchema["$defs"] = doc.definitions;
   return jsonSchema;

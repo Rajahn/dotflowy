@@ -194,6 +194,22 @@ describe("MCP transport", () => {
     expect(ping.result).toEqual({});
   });
 
+  test("tools/list gives every tool an object input schema", async () => {
+    const { store } = makeStore();
+    // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
+    const json = (await (await rpc(store, "tools/list")).json()) as any;
+    for (const t of json.result.tools) {
+      expect({ name: t.name, type: t.inputSchema.type }).toEqual({
+        name: t.name,
+        type: "object",
+      });
+    }
+    const listLibrary = json.result.tools.find(
+      (t: any) => t.name === "list_library",
+    );
+    expect(listLibrary.inputSchema).toEqual({ type: "object", properties: {} });
+  });
+
   test("tools/list publishes the Effect Schema inputs agents rely on", async () => {
     const { store } = makeStore();
     // SAFETY: parsed from the tools/list response our own handler serializes; fields checked by the expects below.
